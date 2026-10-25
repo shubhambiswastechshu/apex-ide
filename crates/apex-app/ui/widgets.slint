@@ -1,0 +1,977 @@
+// Themed building blocks in a Fluent 2 / Visual Studio 2026 style: calm
+// surfaces, 1px borders, 4-8px radii, accent focus and selection. Every
+// color comes from AppTheme so a theme switch restyles the whole window.
+
+import { AppTheme } from "theme.slint";
+import { ShellApi, MenuItem } from "shell_api.slint";
+
+// Line icons drawn as paths on a 16x16 grid, so they never depend on font
+// coverage. Kinds:
+//   chevron-right chevron-down chevron-up close check refresh play stop
+//   search plus new-file new-folder collapse-all sidebar panel-bottom folder
+//   folder-open terminal warning error info database plugin sliders
+//   arrow-left arrow-right trash file clone more save
+export component Icon inherits Path {
+    in property <string> kind;
+    in property <color> color: AppTheme.foreground-muted;
+    in property <length> size: 16px;
+    // Filled glyphs (play, stop) use the color as fill instead of stroke.
+    property <bool> solid: root.kind == "play" || root.kind == "stop" || root.kind == "more";
+
+    width: root.size;
+    height: root.size;
+    viewbox-x: 0;
+    viewbox-y: 0;
+    viewbox-width: 16;
+    viewbox-height: 16;
+    stroke: root.solid ? transparent : root.color;
+    stroke-width: 1.25px;
+    fill: root.solid ? root.color : transparent;
+    commands: root.kind == "chevron-right" ? "M 6 3.5 L 10.5 8 L 6 12.5"
+        : root.kind == "chevron-down" ? "M 3.5 6 L 8 10.5 L 12.5 6"
+        : root.kind == "chevron-up" ? "M 3.5 10 L 8 5.5 L 12.5 10"
+        : root.kind == "close" ? "M 4.5 4.5 L 11.5 11.5 M 11.5 4.5 L 4.5 11.5"
+        : root.kind == "check" ? "M 3.5 8.5 L 6.5 11.5 L 12.5 4.5"
+        : root.kind == "refresh" ? "M 13 8 A 5 5 0 1 1 11.6 4.5 M 12.2 1.8 L 12.2 5 L 9 5"
+        : root.kind == "play" ? "M 4.5 2.6 L 13.2 8 L 4.5 13.4 Z"
+        : root.kind == "stop" ? "M 3.8 3.8 L 12.2 3.8 L 12.2 12.2 L 3.8 12.2 Z"
+        : root.kind == "more" ? "M 3 8 A 1.1 1.1 0 1 0 5.2 8 A 1.1 1.1 0 1 0 3 8 Z M 6.9 8 A 1.1 1.1 0 1 0 9.1 8 A 1.1 1.1 0 1 0 6.9 8 Z M 10.8 8 A 1.1 1.1 0 1 0 13 8 A 1.1 1.1 0 1 0 10.8 8 Z"
+        : root.kind == "search" ? "M 10.2 10.2 L 14 14 M 11.5 6.8 A 4.6 4.6 0 1 1 2.3 6.8 A 4.6 4.6 0 1 1 11.5 6.8"
+        : root.kind == "plus" ? "M 8 3 L 8 13 M 3 8 L 13 8"
+        : root.kind == "new-file" ? "M 8 14.5 L 3.5 14.5 L 3.5 1.5 L 9 1.5 L 12.5 5 L 12.5 8 M 9 1.5 L 9 5 L 12.5 5 M 12 10 L 12 15 M 9.5 12.5 L 14.5 12.5"
+        : root.kind == "new-folder" ? "M 8 12.5 L 1.5 12.5 L 1.5 3 L 5.8 3 L 7.3 4.5 L 14.5 4.5 L 14.5 8 M 12 9.5 L 12 14.5 M 9.5 12 L 14.5 12"
+        : root.kind == "collapse-all" ? "M 5 2 L 8 5 L 11 2 M 5 14 L 8 11 L 11 14 M 2.5 8 L 13.5 8"
+        : root.kind == "sidebar" ? "M 2 3 L 14 3 L 14 13 L 2 13 Z M 6.5 3 L 6.5 13"
+        : root.kind == "panel-bottom" ? "M 2 3 L 14 3 L 14 13 L 2 13 Z M 2 9.5 L 14 9.5"
+        : root.kind == "folder" ? "M 1.5 3 L 5.8 3 L 7.3 4.5 L 14.5 4.5 L 14.5 13 L 1.5 13 Z"
+        : root.kind == "folder-open" ? "M 1.5 13 L 1.5 3 L 5.8 3 L 7.3 4.5 L 13 4.5 L 13 6.5 M 1.5 13 L 3.5 6.5 L 15 6.5 L 13 13 Z"
+        : root.kind == "terminal" ? "M 1.5 2.5 L 14.5 2.5 L 14.5 13.5 L 1.5 13.5 Z M 4.5 6 L 7 8 L 4.5 10 M 8.5 10.5 L 11.5 10.5"
+        : root.kind == "warning" ? "M 8 1.8 L 14.6 13.8 L 1.4 13.8 Z M 8 6.2 L 8 9.6 M 8 11.4 L 8 11.9"
+        : root.kind == "error" ? "M 14 8 A 6 6 0 1 1 2 8 A 6 6 0 1 1 14 8 M 5.8 5.8 L 10.2 10.2 M 10.2 5.8 L 5.8 10.2"
+        : root.kind == "info" ? "M 14 8 A 6 6 0 1 1 2 8 A 6 6 0 1 1 14 8 M 8 7.2 L 8 11.5 M 8 4.6 L 8 5.1"
+        : root.kind == "database" ? "M 3 4 A 5 2 0 1 0 13 4 A 5 2 0 1 0 3 4 M 3 4 L 3 12 A 5 2 0 0 0 13 12 L 13 4 M 3 8 A 5 2 0 0 0 13 8"
+        : root.kind == "plugin" ? "M 2.5 5 L 6 5 A 1.6 1.6 0 1 1 9.2 5 L 12.5 5 L 12.5 8 A 1.6 1.6 0 1 1 12.5 11.2 L 12.5 14 L 2.5 14 Z"
+        : root.kind == "sliders" ? "M 2 4.5 L 14 4.5 M 2 11.5 L 14 11.5 M 5.5 2.5 L 5.5 6.5 M 10.5 9.5 L 10.5 13.5"
+        : root.kind == "arrow-left" ? "M 13 8 L 3 8 M 7 4 L 3 8 L 7 12"
+        : root.kind == "arrow-right" ? "M 3 8 L 13 8 M 9 4 L 13 8 L 9 12"
+        : root.kind == "trash" ? "M 2.5 4.5 L 13.5 4.5 M 6 4.5 L 6 2.5 L 10 2.5 L 10 4.5 M 4 4.5 L 4.8 13.5 L 11.2 13.5 L 12 4.5"
+        : root.kind == "file" ? "M 3.5 1.5 L 9 1.5 L 12.5 5 L 12.5 14.5 L 3.5 14.5 Z M 9 1.5 L 9 5 L 12.5 5"
+        : root.kind == "clone" ? "M 5.5 5.5 L 14 5.5 L 14 14 L 5.5 14 Z M 10.5 5.5 L 10.5 2 L 2 2 L 2 10.5 L 5.5 10.5"
+        : root.kind == "command" ? "M 5.5 2.5 A 1.8 1.8 0 1 0 5.5 6.1 L 10.5 6.1 A 1.8 1.8 0 1 0 10.5 2.5 Z M 5.5 2.5 L 5.5 13.5 M 10.5 2.5 L 10.5 13.5 M 5.5 9.9 A 1.8 1.8 0 1 0 5.5 13.5 M 10.5 9.9 A 1.8 1.8 0 1 1 10.5 13.5 M 4 9.9 L 12 9.9"
+        : root.kind == "find-files" ? "M 7 14.5 L 2.5 14.5 L 2.5 1.5 L 8.5 1.5 L 12 5 L 12 6.5 M 8.5 1.5 L 8.5 5 L 12 5 M 13.5 13.5 L 15 15 M 14 11 A 2.6 2.6 0 1 1 8.8 11 A 2.6 2.6 0 1 1 14 11"
+        : root.kind == "save" ? "M 2.5 2.5 L 11.5 2.5 L 13.5 4.5 L 13.5 13.5 L 2.5 13.5 Z M 5 2.5 L 5 6 L 10.5 6 L 10.5 2.5 M 5 13.5 L 5 9.5 L 11 9.5 L 11 13.5"
+        : "";
+}
+
+// The Apex mark: an accent tile with a white "A" stroke.
+export component AppLogo inherits Rectangle {
+    in property <length> size: 24px;
+
+    width: root.size;
+    height: root.size;
+    border-radius: root.size * 0.24;
+    background: @linear-gradient(135deg, AppTheme.accent.brighter(0.25) 0%, AppTheme.accent 55%, AppTheme.accent.darker(0.2) 100%);
+
+    Path {
+        width: root.size * 0.62;
+        height: root.size * 0.62;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        stroke: AppTheme.accent-foreground;
+        stroke-width: root.size > 40px ? 2.4px : 1.6px;
+        fill: transparent;
+        commands: "M 3 14 L 8 2 L 13 14 M 5 9.6 L 11 9.6";
+    }
+}
+
+// File-type glyphs for the project tree, colored per type.
+// kind (from Rust, see theming::file_icon_kind): folder, python, json, toml,
+// config, md, ipynb, txt, sql, html, css, js, env, image, lock, git, file
+export component FileIcon inherits Rectangle {
+    in property <string> kind;
+    in property <bool> expanded;
+    in property <length> size: 16px;
+
+    property <color> folder-color: AppTheme.dark ? #d8b06a : #c09040;
+    property <color> doc-stroke: AppTheme.dark ? #a8a8b0 : #6a6a72;
+    property <color> tone: root.kind == "json" ? #d4b13a
+        : root.kind == "toml" || root.kind == "config" ? #8c8cf0
+        : root.kind == "md" ? #519aba
+        : root.kind == "ipynb" ? #f37726
+        : root.kind == "sql" ? #e8a33d
+        : root.kind == "html" ? #e44d26
+        : root.kind == "css" ? #42a5f5
+        : root.kind == "js" ? #e8d44d
+        : root.kind == "env" ? #e0b45a
+        : root.kind == "image" ? #a074c4
+        : root.kind == "git" ? #f05133
+        : root.kind == "lock" ? root.doc-stroke
+        : root.doc-stroke;
+
+    width: root.size;
+    height: root.size;
+
+    // Folders.
+    if root.kind == "folder": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        stroke: root.folder-color;
+        stroke-width: 1px;
+        fill: root.folder-color.transparentize(root.expanded ? 0.75 : 0.35);
+        commands: root.expanded
+            ? "M 1.5 13 L 1.5 3 L 5.8 3 L 7.3 4.5 L 13 4.5 L 13 6.5 M 1.5 13 L 3.5 6.5 L 15 6.5 L 13 13 Z"
+            : "M 1.5 3 L 5.8 3 L 7.3 4.5 L 14.5 4.5 L 14.5 13 L 1.5 13 Z";
+    }
+
+    // Python: the two interlocking snakes.
+    if root.kind == "python": Rectangle {
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 16;
+            viewbox-height: 16;
+            fill: #4b8bbe;
+            commands: "M 8 1.5 C 5.2 1.5 5.2 2.7 5.2 3.8 L 5.2 5.3 L 8.3 5.3 L 8.3 6 L 3.6 6 C 2.2 6 1.5 7.1 1.5 8.6 C 1.5 10.2 2.2 11.3 3.5 11.3 L 4.6 11.3 L 4.6 9.6 C 4.6 8.4 5.6 7.5 6.8 7.5 L 9.6 7.5 C 10.6 7.5 11.3 6.8 11.3 5.9 L 11.3 3.8 C 11.3 2.5 10.2 1.5 8 1.5 Z";
+        }
+
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 16;
+            viewbox-height: 16;
+            fill: #f5c932;
+            commands: "M 8 14.5 C 10.8 14.5 10.8 13.3 10.8 12.2 L 10.8 10.7 L 7.7 10.7 L 7.7 10 L 12.4 10 C 13.8 10 14.5 8.9 14.5 7.4 C 14.5 5.8 13.8 4.7 12.5 4.7 L 11.4 4.7 L 11.4 6.4 C 11.4 7.6 10.4 8.5 9.2 8.5 L 6.4 8.5 C 5.4 8.5 4.7 9.2 4.7 10.1 L 4.7 12.2 C 4.7 13.5 5.8 14.5 8 14.5 Z";
+        }
+    }
+
+    // JSON: braces.
+    if root.kind == "json": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        stroke: root.tone;
+        stroke-width: 1.3px;
+        fill: transparent;
+        commands: "M 5.5 2.5 C 3.5 2.5 4.5 7 2.5 8 C 4.5 9 3.5 13.5 5.5 13.5 M 10.5 2.5 C 12.5 2.5 11.5 7 13.5 8 C 11.5 9 12.5 13.5 10.5 13.5";
+    }
+
+    // Notebooks: an orange notebook with binding rings.
+    if root.kind == "ipynb": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        stroke: root.tone;
+        stroke-width: 1.2px;
+        fill: root.tone.transparentize(0.75);
+        commands: "M 4 1.5 L 13.5 1.5 L 13.5 14.5 L 4 14.5 Z M 2 4.5 L 6 4.5 M 2 8 L 6 8 M 2 11.5 L 6 11.5";
+    }
+
+    // SQL / databases: a cylinder.
+    if root.kind == "sql": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        stroke: root.tone;
+        stroke-width: 1.2px;
+        fill: root.tone.transparentize(0.8);
+        commands: "M 3 4 A 5 2 0 1 0 13 4 A 5 2 0 1 0 3 4 M 3 4 L 3 12 A 5 2 0 0 0 13 12 L 13 4 M 3 8 A 5 2 0 0 0 13 8";
+    }
+
+    // HTML: angle brackets.
+    if root.kind == "html" || root.kind == "css" || root.kind == "js": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        stroke: root.tone;
+        stroke-width: 1.4px;
+        fill: transparent;
+        commands: root.kind == "html" ? "M 5.5 4 L 1.5 8 L 5.5 12 M 10.5 4 L 14.5 8 L 10.5 12"
+            : root.kind == "css" ? "M 6 2 L 4.5 14 M 11.5 2 L 10 14 M 2.5 5.5 L 14 5.5 M 2 10.5 L 13.5 10.5"
+            : "M 2 2 L 14 2 L 14 14 L 2 14 Z M 7.5 6.5 L 7.5 11 C 7.5 12.3 5.5 12.3 5.2 11.2 M 12.2 7.2 C 11.4 6 9.3 6.4 9.6 7.6 C 9.9 8.8 12.4 8.5 12.4 10.2 C 12.4 11.7 10 11.9 9.4 10.8";
+    }
+
+    // Images: a framed landscape.
+    if root.kind == "image": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        stroke: root.tone;
+        stroke-width: 1.2px;
+        fill: transparent;
+        commands: "M 1.5 2.5 L 14.5 2.5 L 14.5 13.5 L 1.5 13.5 Z M 1.5 11 L 5.5 7 L 9 10.5 L 11 8.5 L 14.5 12 M 11.5 5.5 A 1 1 0 1 0 11.49 5.5";
+    }
+
+    // .env: a key.
+    if root.kind == "env": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        stroke: root.tone;
+        stroke-width: 1.3px;
+        fill: transparent;
+        commands: "M 8 6 A 3 3 0 1 1 2 6 A 3 3 0 1 1 8 6 M 7.2 8 L 14 14 M 11.5 11.8 L 13 10.3 M 12.8 13 L 14.2 11.6";
+    }
+
+    // Lock files: a padlock.
+    if root.kind == "lock": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        stroke: root.tone;
+        stroke-width: 1.2px;
+        fill: transparent;
+        commands: "M 3 7 L 13 7 L 13 14.5 L 3 14.5 Z M 5 7 L 5 4.5 A 3 3 0 0 1 11 4.5 L 11 7 M 8 9.8 L 8 11.8";
+    }
+
+    // Git files: the git diamond.
+    if root.kind == "git": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        stroke: root.tone;
+        stroke-width: 1.3px;
+        fill: root.tone.transparentize(0.8);
+        commands: "M 8 1.2 L 14.8 8 L 8 14.8 L 1.2 8 Z M 6 4 L 8 6 M 8 6 L 8 11 M 8 6 L 10.5 8.5";
+    }
+
+    // Documents (md, toml, config, txt, other): a page; colored types get a
+    // tinted fold and a marker.
+    if root.kind == "md" || root.kind == "toml" || root.kind == "config" || root.kind == "txt" || root.kind == "file": Rectangle {
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 16;
+            viewbox-height: 16;
+            stroke: root.kind == "txt" || root.kind == "file" ? root.doc-stroke : root.tone;
+            stroke-width: 1.1px;
+            fill: (root.kind == "txt" || root.kind == "file" ? root.doc-stroke : root.tone).transparentize(0.85);
+            commands: "M 3 1.5 L 9.5 1.5 L 13 5 L 13 14.5 L 3 14.5 Z M 9.5 1.5 L 9.5 5 L 13 5";
+        }
+
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 16;
+            viewbox-height: 16;
+            stroke: root.kind == "txt" || root.kind == "file" ? root.doc-stroke : root.tone;
+            stroke-width: 1.1px;
+            fill: transparent;
+            commands: root.kind == "md" ? "M 5 12 L 5 8 L 6.7 10 L 8.4 8 L 8.4 12 M 10.8 8 L 10.8 12 M 9.6 10.8 L 10.8 12 L 12 10.8"
+                : root.kind == "toml" || root.kind == "config" ? "M 5.5 8 L 10.5 8 M 5.5 10.5 L 9 10.5 M 5.5 12.5 L 10.5 12.5"
+                : root.kind == "txt" ? "M 5.5 8 L 10.5 8 M 5.5 10.5 L 10.5 10.5 M 5.5 12.5 L 8.5 12.5"
+                : "";
+        }
+    }
+}
+
+// kind: 0 normal (secondary), 1 primary (accent), 2 danger, 3 subtle (no
+// border until hovered)
+export component ApexButton inherits Rectangle {
+    in property <string> text;
+    in property <string> icon;
+    in property <color> icon-color: transparent;
+    in property <int> kind: 0;
+    in property <bool> enabled: true;
+    in property <bool> compact: false;
+    in property <string> tooltip;
+    callback clicked();
+
+    property <color> base: root.kind == 1 ? AppTheme.accent
+        : root.kind == 2 ? AppTheme.error
+        : root.kind == 3 ? transparent
+        : (AppTheme.dark ? AppTheme.surface-alt : AppTheme.surface);
+    property <color> label-color: !root.enabled ? AppTheme.foreground-muted.transparentize(0.25)
+        : (root.kind == 1 || root.kind == 2) ? AppTheme.accent-foreground
+        : AppTheme.foreground;
+
+    height: root.compact ? AppTheme.control-height + 2px : AppTheme.control-height + 6px;
+    min-width: root.text == "" ? self.height : 0px;
+    horizontal-stretch: 0;
+    border-radius: 4px;
+    border-width: root.kind == 0 ? 1px : 0px;
+    border-color: AppTheme.border;
+    opacity: root.enabled ? 1 : (root.kind == 1 || root.kind == 2 ? 0.45 : 0.8);
+    background: !root.enabled ? root.base
+        : touch.pressed ? (root.kind == 3 || root.kind == 0 ? AppTheme.foreground.transparentize(0.86) : root.base.darker(0.18))
+        : touch.has-hover ? (root.kind == 3 || root.kind == 0 ? AppTheme.foreground.transparentize(0.92) : root.base.brighter(0.12))
+        : root.base;
+    accessible-role: button;
+    accessible-label: root.text != "" ? root.text : root.tooltip != "" ? root.tooltip : root.icon;
+
+    animate background { duration: 90ms; }
+
+    HorizontalLayout {
+        padding-left: root.text == "" ? 0px : root.compact ? 8px : 14px;
+        padding-right: root.text == "" ? 0px : root.compact ? 9px : 14px;
+        spacing: 6px;
+        alignment: center;
+        if root.icon != "": VerticalLayout {
+            alignment: center;
+            Icon {
+                kind: root.icon;
+                size: root.compact ? 14px : 16px;
+                color: root.icon-color != transparent && root.enabled ? root.icon-color : root.label-color;
+            }
+        }
+        if root.text != "": Text {
+            text: root.text;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+            font-weight: root.kind == 1 ? 600 : 400;
+            color: root.label-color;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? MouseCursor.pointer : MouseCursor.default;
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    if root.tooltip != "" && touch.has-hover: Rectangle {
+        x: (root.width - self.width) / 2;
+        y: root.height + 6px;
+        width: tip.preferred-width + 16px;
+        height: 24px;
+        z: 100;
+        border-radius: 4px;
+        background: AppTheme.popup-background;
+        border-width: 1px;
+        border-color: AppTheme.popup-border;
+        drop-shadow-blur: 8px;
+        drop-shadow-color: AppTheme.popup-shadow;
+        tip := Text {
+            text: root.tooltip;
+            font-size: 11px;
+            color: AppTheme.foreground;
+        }
+    }
+}
+
+// A square, borderless icon button for toolbars and tool window headers.
+export component IconButton inherits ApexButton {
+    kind: 3;
+    compact: true;
+    width: self.height;
+}
+
+export component ApexLineEdit inherits Rectangle {
+    animate border-color { duration: AppTheme.fast; easing: ease-out; }
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder;
+    in property <bool> enabled <=> input.enabled;
+    in property <bool> mono: false;
+    in property <string> icon;
+    out property <bool> has-focus: input.has-focus;
+    callback edited(string);
+    callback accepted(string);
+
+    height: AppTheme.control-height + 6px;
+    min-width: 60px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: input.has-focus ? AppTheme.accent : hover.has-hover ? AppTheme.foreground-muted.transparentize(0.5) : AppTheme.border;
+    background: !root.enabled ? AppTheme.surface : AppTheme.editor-background;
+    forward-focus: input;
+
+    hover := TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => {
+            input.focus();
+        }
+    }
+
+    if root.icon != "": Icon {
+        x: 9px;
+        kind: root.icon;
+        size: 14px;
+    }
+
+    Rectangle {
+        x: root.icon != "" ? 30px : 10px;
+        width: parent.width - self.x - 10px;
+        clip: true;
+
+        Text {
+            width: 100%;
+            height: 100%;
+            vertical-alignment: center;
+            text: root.text == "" ? root.placeholder : "";
+            color: AppTheme.foreground-muted;
+            font-family: root.mono ? AppTheme.code-font : AppTheme.ui-font;
+            font-size: root.mono ? 12px : AppTheme.ui-font-size;
+            overflow: elide;
+        }
+
+        input := TextInput {
+            property <length> computed-x;
+            x: min(0px, max(parent.width - self.width - self.text-cursor-width, self.computed-x));
+            width: max(parent.width - self.text-cursor-width, self.preferred-width);
+            height: 100%;
+            vertical-alignment: center;
+            single-line: true;
+            color: AppTheme.foreground;
+            selection-background-color: AppTheme.selection;
+            selection-foreground-color: AppTheme.foreground;
+            font-family: root.mono ? AppTheme.code-font : AppTheme.ui-font;
+            font-size: root.mono ? 12px : AppTheme.ui-font-size;
+
+            cursor-position-changed(pos) => {
+                if pos.x + self.computed-x < 0px {
+                    self.computed-x = -pos.x;
+                } else if pos.x + self.computed-x > parent.width - self.text-cursor-width {
+                    self.computed-x = parent.width - pos.x - self.text-cursor-width;
+                }
+            }
+            edited => {
+                root.edited(self.text);
+            }
+            accepted => {
+                root.accepted(self.text);
+            }
+        }
+    }
+
+    // Fluent focus underline.
+    Rectangle {
+        y: parent.height - 2px;
+        x: 1px;
+        width: parent.width - 2px;
+        height: 2px;
+        border-radius: 1px;
+        background: input.has-focus ? AppTheme.accent : transparent;
+    }
+}
+
+export component ApexCheckBox inherits HorizontalLayout {
+    in-out property <bool> checked;
+    in property <string> text;
+    in property <bool> enabled: true;
+    callback toggled(bool);
+
+    spacing: 8px;
+    VerticalLayout {
+        alignment: center;
+        Rectangle {
+            width: 18px;
+            height: 18px;
+            border-radius: 4px;
+            border-width: root.checked ? 0px : 1px;
+            border-color: AppTheme.foreground-muted;
+            background: root.checked ? AppTheme.accent : box-touch.has-hover ? AppTheme.surface-alt : AppTheme.editor-background;
+            if root.checked: Icon {
+                kind: "check";
+                size: 14px;
+                color: AppTheme.accent-foreground;
+            }
+            box-touch := TouchArea {
+                enabled: root.enabled;
+                mouse-cursor: MouseCursor.pointer;
+                clicked => {
+                    root.checked = !root.checked;
+                    root.toggled(root.checked);
+                }
+            }
+        }
+    }
+
+    Text {
+        text: root.text;
+        vertical-alignment: center;
+        overflow: elide;
+        color: root.enabled ? AppTheme.foreground : AppTheme.foreground-muted;
+        TouchArea {
+            enabled: root.enabled;
+            mouse-cursor: MouseCursor.pointer;
+            clicked => {
+                root.checked = !root.checked;
+                root.toggled(root.checked);
+            }
+        }
+    }
+}
+
+export component ApexSwitch inherits Rectangle {
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    callback toggled(bool);
+
+    width: 40px;
+    height: 20px;
+    border-radius: 10px;
+    background: root.checked ? (touch.has-hover ? AppTheme.accent.brighter(0.1) : AppTheme.accent) : transparent;
+    border-width: root.checked ? 0px : 1px;
+    border-color: AppTheme.foreground-muted;
+    accessible-role: switch;
+    accessible-checked: root.checked;
+
+    Rectangle {
+        width: touch.pressed ? 16px : 12px;
+        height: 12px;
+        y: 4px;
+        x: root.checked ? parent.width - self.width - 4px : 4px;
+        border-radius: 6px;
+        background: root.checked ? AppTheme.accent-foreground : AppTheme.foreground-muted;
+        animate x, width { duration: 140ms; easing: ease-out; }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: MouseCursor.pointer;
+        clicked => {
+            root.toggled(!root.checked);
+        }
+    }
+}
+
+// A selectable pill, used for Python versions and radio-like choices.
+export component Chip inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    height: 28px;
+    min-width: 52px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: root.selected ? AppTheme.accent : AppTheme.border;
+    background: root.selected ? AppTheme.accent.transparentize(0.82) : touch.has-hover ? AppTheme.surface-alt : AppTheme.editor-background;
+    animate background { duration: 90ms; }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        alignment: center;
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            font-weight: root.selected ? 600 : 400;
+            color: root.enabled ? AppTheme.foreground : AppTheme.foreground-muted;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: MouseCursor.pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component RadioRow inherits HorizontalLayout {
+    in property <bool> selected;
+    in property <string> text;
+    callback clicked();
+
+    spacing: 8px;
+    VerticalLayout {
+        alignment: center;
+        Rectangle {
+            width: 18px;
+            height: 18px;
+            border-radius: 9px;
+            border-width: root.selected ? 5px : 1px;
+            border-color: root.selected ? AppTheme.accent : AppTheme.foreground-muted;
+            background: root.selected ? AppTheme.accent-foreground : AppTheme.editor-background;
+        }
+    }
+
+    Text {
+        text: root.text;
+        vertical-alignment: center;
+        color: AppTheme.foreground;
+    }
+
+    TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component Badge inherits Rectangle {
+    in property <string> text;
+    in property <color> tone: AppTheme.accent;
+
+    height: 18px;
+    border-radius: 4px;
+    background: root.tone.transparentize(0.84);
+
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 6px;
+        Text {
+            text: root.text;
+            font-size: 11px;
+            font-weight: 600;
+            vertical-alignment: center;
+            color: AppTheme.foreground;
+        }
+    }
+}
+
+export component SectionTitle inherits Text {
+    color: AppTheme.foreground-muted;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+}
+
+// A drop-down list built on PopupWindow.
+export component Dropdown inherits Rectangle {
+    in property <[string]> model;
+    in property <int> current-index;
+    in property <bool> enabled: true;
+    in property <string> placeholder: "None";
+    in property <string> icon;
+    callback selected(int);
+
+    height: AppTheme.control-height + 4px;
+    min-width: 120px;
+    border-radius: 4px;
+    animate border-color, background { duration: AppTheme.fast; easing: ease-out; }
+    border-width: 1px;
+    border-color: popup-open ? AppTheme.accent : AppTheme.border;
+    background: touch.has-hover && root.enabled ? AppTheme.surface-alt : (AppTheme.dark ? AppTheme.surface : AppTheme.editor-background);
+    property <bool> popup-open: false;
+
+    HorizontalLayout {
+        padding-left: 9px;
+        padding-right: 8px;
+        spacing: 7px;
+        if root.icon != "": VerticalLayout {
+            alignment: center;
+            Icon {
+                kind: root.icon;
+                size: 14px;
+            }
+        }
+        Text {
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+            overflow: elide;
+            text: root.current-index >= 0 && root.current-index < root.model.length ? root.model[root.current-index] : root.placeholder;
+            color: root.enabled ? AppTheme.foreground : AppTheme.foreground-muted;
+        }
+
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                kind: "chevron-down";
+                size: 12px;
+            }
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled && root.model.length > 0;
+        mouse-cursor: MouseCursor.pointer;
+        clicked => {
+            popup.show();
+        }
+    }
+
+    popup := PopupWindow {
+        x: 0px;
+        y: root.height + 4px;
+        width: max(root.width, 220px);
+
+        Rectangle {
+            background: AppTheme.popup-background;
+            border-width: 1px;
+            border-color: AppTheme.popup-border;
+            border-radius: 8px;
+            drop-shadow-blur: 16px;
+            drop-shadow-offset-y: 4px;
+            drop-shadow-color: AppTheme.popup-shadow;
+
+            VerticalLayout {
+                padding: 4px;
+                for item[i] in root.model: Rectangle {
+                    height: 28px;
+                    border-radius: 4px;
+                    background: item-touch.has-hover ? AppTheme.popup-selection : transparent;
+                    if i == root.current-index: Rectangle {
+                        x: 0px;
+                        width: 3px;
+                        height: 14px;
+                        border-radius: 1.5px;
+                        background: AppTheme.accent;
+                    }
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 8px;
+                        Text {
+                            text: item;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            font-weight: i == root.current-index ? 600 : 400;
+                            color: AppTheme.foreground;
+                        }
+                    }
+
+                    item-touch := TouchArea {
+                        clicked => {
+                            root.selected(i);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// A drag handle between two panes: a 1px line with a wider hit area that
+// lights up in the accent color. `vertical: true` is a horizontal bar
+// dragged up/down; `dragged` reports the movement since the press.
+export component Splitter inherits Rectangle {
+    in property <bool> vertical;
+    callback dragged(length);
+    callback released();
+
+    background: transparent;
+
+    Rectangle {
+        x: root.vertical ? 0px : (root.width - self.width) / 2;
+        y: root.vertical ? (root.height - self.height) / 2 : 0px;
+        width: root.vertical ? root.width : (touch.has-hover || touch.pressed ? 2px : 1px);
+        height: root.vertical ? (touch.has-hover || touch.pressed ? 2px : 1px) : root.height;
+        background: touch.pressed ? AppTheme.accent : touch.has-hover ? AppTheme.accent.transparentize(0.3) : AppTheme.border;
+        animate background { duration: 120ms; }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: root.vertical ? MouseCursor.row-resize : MouseCursor.col-resize;
+        moved => {
+            root.dragged(root.vertical ? self.mouse-y - self.pressed-y : self.mouse-x - self.pressed-x);
+        }
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.up {
+                root.released();
+            }
+        }
+    }
+}
+
+// A modal dialog: dims the screen, swallows clicks, centers its children.
+export component Modal inherits Rectangle {
+    in property <string> title;
+    in property <string> message;
+
+    property <bool> shown: false;
+    init => {
+        self.shown = true;
+    }
+    background: root.shown ? #00000060 : #00000000;
+    animate background { duration: AppTheme.normal; easing: ease-out; }
+    TouchArea { }
+
+    dialog := Rectangle {
+        opacity: root.shown ? 1 : 0;
+        transform-scale: root.shown ? 1 : 0.96;
+        animate opacity, transform-scale { duration: AppTheme.normal; easing: ease-out; }
+        width: min(480px, root.width - 40px);
+        height: body.preferred-height;
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        background: AppTheme.popup-background;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: AppTheme.popup-border;
+        drop-shadow-blur: 32px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: AppTheme.popup-shadow;
+
+        body := VerticalLayout {
+            padding: 24px;
+            spacing: 12px;
+            Text {
+                text: root.title;
+                font-size: 18px;
+                font-weight: 600;
+                color: AppTheme.foreground;
+            }
+
+            Text {
+                text: root.message;
+                wrap: word-wrap;
+                color: AppTheme.foreground-muted;
+            }
+
+            Rectangle {
+                height: 8px;
+            }
+
+            HorizontalLayout {
+                alignment: end;
+                spacing: 8px;
+                @children
+            }
+        }
+    }
+}
+
+
+// The animated drop-down body (fades and slides in when shown).
+component MenuPanel inherits Rectangle {
+    in property <[MenuItem]> items;
+    property <bool> shown: false;
+
+    init => {
+        self.shown = true;
+    }
+
+    // Only fade: a `y` binding here would take the panel out of the
+    // PopupWindow's layout, leaving the popup zero-sized so every click on
+    // an item landed "outside" it and just closed the menu.
+    opacity: root.shown ? 1 : 0;
+    animate opacity { duration: AppTheme.fast; easing: ease-out; }
+
+    background: AppTheme.popup-background;
+    border-width: 1px;
+    border-color: AppTheme.popup-border;
+    border-radius: 6px;
+    drop-shadow-blur: 18px;
+    drop-shadow-offset-y: 6px;
+    drop-shadow-color: AppTheme.popup-shadow;
+
+    VerticalLayout {
+        padding: 4px;
+        for e in root.items: Rectangle {
+            height: e.separator ? 9px : AppTheme.row-height + 2px;
+            border-radius: 4px;
+            background: !e.separator && e.enabled && item.has-hover ? AppTheme.popup-selection : transparent;
+            animate background { duration: AppTheme.fast; }
+
+            if e.separator: Rectangle {
+                x: 8px;
+                width: parent.width - 16px;
+                height: 1px;
+                background: AppTheme.popup-border;
+            }
+            if !e.separator: HorizontalLayout {
+                padding-left: 4px;
+                padding-right: 10px;
+                spacing: 6px;
+                VerticalLayout {
+                    alignment: center;
+                    width: 20px;
+                    if e.checked: Icon {
+                        kind: "check";
+                        size: 13px;
+                        color: AppTheme.accent;
+                    }
+                }
+                Text {
+                    text: e.text;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                    color: e.enabled ? AppTheme.foreground : AppTheme.foreground-muted.transparentize(0.3);
+                    overflow: elide;
+                }
+                Text {
+                    text: e.shortcut;
+                    vertical-alignment: center;
+                    font-size: AppTheme.ui-font-size - 1px;
+                    color: AppTheme.foreground-muted.transparentize(e.enabled ? 0 : 0.4);
+                }
+            }
+            item := TouchArea {
+                enabled: e.enabled && !e.separator;
+                clicked => {
+                    ShellApi.invoke(e.id);
+                }
+            }
+        }
+    }
+}
+
+// A menu-bar title that opens a drop-down of registry commands. Items
+// come from Rust (ShellApi.menus); activating one calls ShellApi.invoke.
+export component MenuButton inherits Rectangle {
+    in property <string> text;
+    in property <[MenuItem]> items;
+    in property <color> foreground: AppTheme.title-bar-foreground;
+    callback opening();
+
+    height: AppTheme.menu-height - 2px;
+    width: label.preferred-width + 16px;
+    border-radius: 4px;
+    background: touch.pressed ? root.foreground.transparentize(0.82) : touch.has-hover ? root.foreground.transparentize(0.9) : transparent;
+    animate background { duration: AppTheme.fast; easing: ease-out; }
+
+    label := Text {
+        text: root.text;
+        color: root.foreground;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        clicked => {
+            root.opening();
+            menu.show();
+        }
+    }
+
+    menu := PopupWindow {
+        x: 0px;
+        y: root.height + 2px;
+        width: 300px;
+        // Explicit size: the popup's hit area is its own geometry.
+        height: panel.preferred-height;
+
+        panel := MenuPanel {
+            width: parent.width;
+            height: parent.height;
+            items: root.items;
+        }
+    }
+}
+
+// A toolbar separator.
+export component ToolSeparator inherits Rectangle {
+    width: 9px;
+    Rectangle {
+        width: 1px;
+        height: 60%;
+        background: AppTheme.title-bar-foreground.transparentize(0.75);
+    }
+}
+
+// FileIcon kind for a file name (mirrors tree_view::file_icon_kind in Rust).
+export global FileKinds {
+    public pure function of(name: string) -> string {
+        if name == "" { return "file"; }
+        if name.to-lowercase().starts-with(".env") { return "env"; }
+        if name.to-lowercase().starts-with(".git") { return "git"; }
+        if name.to-lowercase().ends-with(".py") || name.to-lowercase().ends-with(".pyi") { return "python"; }
+        if name.to-lowercase().ends-with(".json") { return "json"; }
+        if name.to-lowercase().ends-with(".toml") { return "toml"; }
+        if name.to-lowercase().ends-with(".yaml") || name.to-lowercase().ends-with(".yml") || name.to-lowercase().ends-with(".ini") || name.to-lowercase().ends-with(".cfg") { return "config"; }
+        if name.to-lowercase().ends-with(".md") { return "md"; }
+        if name.to-lowercase().ends-with(".ipynb") { return "ipynb"; }
+        if name.to-lowercase().ends-with(".txt") || name.to-lowercase().ends-with(".log") || name.to-lowercase().ends-with(".csv") { return "txt"; }
+        if name.to-lowercase().ends-with(".sql") || name.to-lowercase().ends-with(".db") || name.to-lowercase().ends-with(".sqlite") { return "sql"; }
+        if name.to-lowercase().ends-with(".html") || name.to-lowercase().ends-with(".htm") { return "html"; }
+        if name.to-lowercase().ends-with(".css") { return "css"; }
+        if name.to-lowercase().ends-with(".js") || name.to-lowercase().ends-with(".ts") { return "js"; }
+        if name.to-lowercase().ends-with(".png") || name.to-lowercase().ends-with(".jpg") || name.to-lowercase().ends-with(".jpeg") || name.to-lowercase().ends-with(".gif") || name.to-lowercase().ends-with(".svg") || name.to-lowercase().ends-with(".ico") { return "image"; }
+        if name.to-lowercase().ends-with(".lock") { return "lock"; }
+        return "file";
+    }
+}

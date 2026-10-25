@@ -1,0 +1,125 @@
+// The window "shell" contract: menus, key routing, the command palette and
+// Go to File, Find in Files, and the Settings / Keyboard Shortcuts / Open
+// Folder dialogs. Rust (src/commands.rs) fills menus from the single command
+// registry in apex-core::keymap and runs every command; views only call
+// ShellApi.invoke(id).
+
+export struct MenuItem {
+    id: string,
+    text: string,
+    shortcut: string,
+    enabled: bool,
+    checked: bool,
+    separator: bool,
+}
+
+export struct MenuDef {
+    title: string,
+    items: [MenuItem],
+}
+
+// A run of text; `hit` marks fuzzy-matched characters.
+export struct Segment {
+    text: string,
+    hit: bool,
+}
+
+export struct PaletteItem {
+    title: [Segment],
+    detail: string,
+    shortcut: string,
+    // FileIcon kind, or "command".
+    icon: string,
+    // Category header row (not selectable).
+    header: bool,
+}
+
+export struct ShortcutRow {
+    category: string,
+    title: string,
+    keys: string,
+    conflict: bool,
+    header: bool,
+}
+
+// kind: 0 file header, 1 matching line
+export struct FindRow {
+    kind: int,
+    text: string,
+    detail: string,
+    icon: string,
+    count: int,
+}
+
+// A row of the Ctrl+Tab switcher.
+export struct SwitcherItem {
+    title: string,
+    // Folder, relative to the project.
+    detail: string,
+    // FileIcon kind.
+    icon: string,
+    dirty: bool,
+}
+
+export global ShellApi {
+    // Menus (refreshed by Rust when one opens).
+    in-out property <[MenuDef]> menus;
+    callback menu-opening(int);
+    callback invoke(string);
+    // Global key routing: key text, ctrl, alt, shift, meta -> handled.
+    callback key(string, bool, bool, bool, bool) -> bool;
+    // Sees every key before the focused element (same arguments): returns
+    // true to take it (the second key of a pending chord).
+    callback key-capture(string, bool, bool, bool, bool) -> bool;
+    // A key was released (same arguments as `key`, text only): true to take it.
+    callback key-released(string) -> bool;
+    // Pending first chord of a two-chord shortcut, shown in the status bar.
+    in-out property <string> pending-chord;
+    // Bumped to give keyboard focus back to the window (after an overlay).
+    in-out property <int> refocus: 0;
+
+    in-out property <bool> toolbar-visible: true;
+    in-out property <bool> status-visible: true;
+    // 0 none, 1 new file prompt, 2 new folder prompt
+    in-out property <int> new-entry-kind: 0;
+    // Bumped to focus the explorer's search box.
+    in-out property <int> explorer-focus: 0;
+
+    // Command palette / Go to File / Go to Line.
+    // mode: 0 commands, 1 files, 2 line, 3 search everywhere
+    in-out property <bool> palette-open;
+    in-out property <int> palette-mode;
+    in-out property <string> palette-text;
+    in-out property <[PaletteItem]> palette-items;
+    in-out property <int> palette-index;
+    in-out property <string> palette-status;
+    in-out property <int> palette-serial;
+    callback palette-edited(string);
+    callback palette-accept(int);
+    callback palette-closed();
+
+    // Ctrl+Tab switcher: open files, most recently used first.
+    in-out property <bool> switcher-open;
+    in-out property <[SwitcherItem]> switcher-items;
+    in-out property <int> switcher-index;
+    callback switcher-pick(int);
+
+    // Dialogs.
+    in-out property <bool> shortcuts-open;
+    in-out property <[ShortcutRow]> shortcuts;
+    in-out property <string> keymap-path;
+    in-out property <bool> settings-open;
+    in-out property <bool> open-folder-open;
+    in-out property <string> open-folder-path;
+    callback set-compact(bool);
+
+    // Find in Files (tool window 4).
+    in-out property <string> find-text;
+    in-out property <bool> find-case;
+    in-out property <bool> find-busy;
+    in-out property <string> find-status;
+    in-out property <[FindRow]> find-rows;
+    in-out property <int> find-focus: 0;
+    callback find-run(string, bool);
+    callback find-open(int);
+}

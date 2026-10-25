@@ -1,0 +1,1214 @@
+// The main IDE window, laid out like Visual Studio: a registry-driven menu
+// bar with Search and the project pill, a dense toolbar, the document well
+// (tabs + editor), the dockable Project Explorer (Alt+1), the bottom tool
+// windows and the status bar. Every action goes through ShellApi.invoke so
+// menus, toolbar, palette and shortcuts share one command registry.
+
+import { ScrollView, ListView } from "std-widgets.slint";
+import { AppTheme } from "theme.slint";
+import { AppApi, WorkspaceApi, ToolsApi, TreeItem } from "api.slint";
+import { ShellApi } from "shell_api.slint";
+import {
+    ApexButton, IconButton, ApexLineEdit, Dropdown, Splitter, Modal, Icon, FileIcon, AppLogo,
+    MenuButton, ToolSeparator, FileKinds,
+} from "widgets.slint";
+import { EditorArea } from "editor.slint";
+import { RunPanel, ProblemsPanel, DatabasePanel, PluginsPanel, FindPanel } from "panels.slint";
+
+// ------------------------------------------------------------ menu bar
+
+component MenuBar inherits Rectangle {
+    height: AppTheme.menu-height;
+    background: AppTheme.title-bar;
+
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 8px;
+        spacing: 0px;
+
+        VerticalLayout {
+            alignment: center;
+            padding-right: 6px;
+            AppLogo {
+                size: AppTheme.compact ? 16px : 20px;
+            }
+        }
+
+        for m[i] in ShellApi.menus: VerticalLayout {
+            alignment: center;
+            MenuButton {
+                text: m.title;
+                items: m.items;
+                opening => {
+                    ShellApi.menu-opening(i);
+                }
+            }
+        }
+
+        Rectangle {
+            width: 10px;
+        }
+
+        // Search Everywhere (also Shift Shift).
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                height: AppTheme.menu-height - 4px;
+                width: search-row.preferred-width + 18px;
+                border-radius: 4px;
+                background: search-touch.has-hover ? AppTheme.title-bar-foreground.transparentize(0.9) : transparent;
+                animate background { duration: AppTheme.fast; }
+                search-row := HorizontalLayout {
+                    x: 9px;
+                    spacing: 5px;
+                    VerticalLayout {
+                        alignment: center;
+                        Icon {
+                            kind: "search";
+                            size: 13px;
+                            color: AppTheme.title-bar-foreground;
+                        }
+                    }
+                    Text {
+                        text: "Search";
+                        vertical-alignment: center;
+                        color: AppTheme.title-bar-foreground;
+                    }
+                }
+                search-touch := TouchArea {
+                    mouse-cursor: MouseCursor.pointer;
+                    clicked => {
+                        ShellApi.invoke("nav.search_everywhere");
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            width: 6px;
+        }
+
+        // Project pill.
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                height: AppTheme.menu-height - 4px;
+                width: min(pill-text.preferred-width + 22px, 320px);
+                border-radius: 4px;
+                background: AppTheme.framed ? AppTheme.title-bar.darker(0.07) : AppTheme.surface-alt;
+                pill-text := Text {
+                    width: parent.width - 18px;
+                    text: WorkspaceApi.project-name;
+                    color: AppTheme.title-bar-foreground;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+        }
+
+        VerticalLayout {
+            alignment: center;
+            Text {
+                text: WorkspaceApi.project-path;
+                font-size: AppTheme.ui-font-size - 1px;
+                color: AppTheme.title-bar-foreground.transparentize(0.4);
+                overflow: elide;
+                max-width: 360px;
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------- toolbar
+
+component Cmd inherits IconButton {
+    in property <string> command;
+    clicked => {
+        ShellApi.invoke(root.command);
+    }
+}
+
+component InterpreterCombo inherits Rectangle {
+    property <bool> open;
+    height: AppTheme.control-height + 4px;
+    width: min(260px, max(160px, interp.preferred-width + 48px));
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: touch.has-hover ? AppTheme.accent : AppTheme.border;
+    background: touch.has-hover ? AppTheme.surface-alt : (AppTheme.dark ? AppTheme.surface : AppTheme.editor-background);
+    accessible-role: combobox;
+    accessible-label: "Python interpreter";
+    accessible-value: interp.text;
+
+    HorizontalLayout {
+        padding-left: 7px;
+        padding-right: 7px;
+        spacing: 6px;
+        VerticalLayout {
+            alignment: center;
+            FileIcon {
+                kind: "python";
+                size: 14px;
+            }
+        }
+        interp := Text {
+            text: WorkspaceApi.interpreter-text == "" ? "No interpreter" : WorkspaceApi.interpreter-text;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+            color: AppTheme.foreground;
+        }
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                kind: "chevron-down";
+                size: 12px;
+            }
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => {
+            WorkspaceApi.interpreter-opening();
+            popup.show();
+        }
+    }
+
+    popup := PopupWindow {
+        x: 0px;
+        y: root.height + 4px;
+        width: max(root.width, 420px);
+        height: body.preferred-height;
+
+        Rectangle {
+            background: AppTheme.popup-background;
+            border-width: 1px;
+            border-color: AppTheme.popup-border;
+            border-radius: 8px;
+            drop-shadow-blur: 16px;
+            drop-shadow-offset-y: 4px;
+            drop-shadow-color: AppTheme.popup-shadow;
+        }
+
+        body := VerticalLayout {
+            padding: 4px;
+            if WorkspaceApi.interpreters-scanning || WorkspaceApi.interpreter-choices.length == 0: Rectangle {
+                height: 28px;
+                Text {
+                    x: 12px;
+                    text: WorkspaceApi.interpreters-scanning ? "Looking for Python interpreters..." : "No Python interpreters found";
+                    color: AppTheme.foreground-muted;
+                    vertical-alignment: center;
+                }
+            }
+            for item[i] in WorkspaceApi.interpreter-choices: Rectangle {
+                height: 28px;
+                border-radius: 4px;
+                background: item-touch.has-hover ? AppTheme.popup-selection : transparent;
+                if i == WorkspaceApi.interpreter-choice: Rectangle {
+                    x: 0px;
+                    width: 3px;
+                    height: 14px;
+                    border-radius: 1.5px;
+                    background: AppTheme.accent;
+                }
+                Text {
+                    x: 12px;
+                    width: parent.width - 20px;
+                    text: item;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    font-weight: i == WorkspaceApi.interpreter-choice ? 600 : 400;
+                    color: AppTheme.foreground;
+                }
+                item-touch := TouchArea {
+                    clicked => {
+                        WorkspaceApi.select-interpreter(i);
+                    }
+                }
+            }
+        }
+    }
+}
+
+component Toolbar inherits Rectangle {
+    height: AppTheme.toolbar-height;
+    background: AppTheme.title-bar;
+
+    HorizontalLayout {
+        padding-left: 4px;
+        padding-right: 6px;
+        padding-top: 2px;
+        padding-bottom: 2px;
+        spacing: 1px;
+
+        Cmd {
+            icon: "sidebar";
+            command: "view.project";
+            tooltip: "Project Explorer (Alt+1)";
+            icon-color: WorkspaceApi.tree-visible ? AppTheme.accent : transparent;
+        }
+
+        ToolSeparator { }
+
+        Cmd {
+            icon: "new-file";
+            command: "file.new_file";
+            tooltip: "New File (Ctrl+N)";
+        }
+
+        Cmd {
+            icon: "new-folder";
+            command: "file.new_folder";
+            tooltip: "New Folder";
+        }
+
+        Cmd {
+            icon: "save";
+            command: "file.save";
+            tooltip: "Save (Ctrl+S)";
+            icon-color: AppTheme.framed ? #3a6fc4 : transparent;
+            enabled: WorkspaceApi.active-tab >= 0 && WorkspaceApi.active-tab < WorkspaceApi.tabs.length && WorkspaceApi.tabs[WorkspaceApi.active-tab].dirty;
+        }
+
+        ToolSeparator { }
+
+        Cmd {
+            icon: "search";
+            command: "nav.goto_file";
+            tooltip: "Go to File (Ctrl+Shift+O)";
+        }
+
+        Cmd {
+            icon: "find-files";
+            command: "edit.find_in_files";
+            tooltip: "Find in Files (Ctrl+Shift+F)";
+        }
+
+        ToolSeparator { }
+
+        VerticalLayout {
+            alignment: center;
+            Dropdown {
+                width: 170px;
+                icon: "file";
+                model: WorkspaceApi.run-configs;
+                current-index: WorkspaceApi.run-config-index;
+                placeholder: "No run configuration";
+                selected(i) => {
+                    WorkspaceApi.select-run-config(i);
+                }
+            }
+        }
+
+        Rectangle {
+            width: 3px;
+        }
+
+        ApexButton {
+            text: "Start";
+            icon: "play";
+            icon-color: #1f9d3a;
+            kind: 3;
+            compact: true;
+            enabled: !ToolsApi.running;
+            tooltip: "Run (Shift+F10)";
+            clicked => {
+                ShellApi.invoke("run.run");
+            }
+        }
+
+        Cmd {
+            icon: "stop";
+            command: "run.stop";
+            icon-color: #d13438;
+            tooltip: "Stop (Ctrl+F2)";
+            enabled: ToolsApi.running;
+        }
+
+        ToolSeparator { }
+
+        // Interpreter (like VS's environment box): opens a list of the
+        // interpreters found for the project.
+        VerticalLayout {
+            alignment: center;
+            InterpreterCombo { }
+        }
+
+        ToolSeparator { }
+
+        Cmd {
+            icon: "terminal";
+            command: "view.output";
+            tooltip: "Output (Alt+4)";
+        }
+
+        Cmd {
+            icon: "warning";
+            command: "view.problems";
+            tooltip: "Problems (Alt+6)";
+        }
+
+        Cmd {
+            icon: "database";
+            command: "view.databases";
+            tooltip: "Databases (Alt+7)";
+        }
+
+        Cmd {
+            icon: "plugin";
+            command: "view.plugins";
+            tooltip: "Plugins (Alt+8)";
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+        }
+
+        Cmd {
+            icon: "command";
+            command: "view.command_palette";
+            tooltip: "Command Palette (Ctrl+Shift+P)";
+        }
+
+        Cmd {
+            icon: "sliders";
+            command: "file.settings";
+            tooltip: "Settings (Ctrl+Alt+S)";
+        }
+    }
+}
+
+// ----------------------------------------------------- tool window title
+
+component TitleAction inherits Rectangle {
+    in property <string> icon;
+    in property <string> tip;
+    callback clicked();
+
+    width: 20px;
+    height: 18px;
+    y: 2px;
+    border-radius: 3px;
+    background: t.pressed ? (AppTheme.framed ? AppTheme.frame-foreground.transparentize(0.7) : AppTheme.foreground.transparentize(0.84))
+        : t.has-hover ? (AppTheme.framed ? AppTheme.frame-foreground.transparentize(0.82) : AppTheme.foreground.transparentize(0.9)) : transparent;
+    animate background { duration: AppTheme.fast; }
+    Icon {
+        kind: root.icon;
+        size: 12px;
+        color: AppTheme.framed ? AppTheme.frame-foreground : AppTheme.foreground-muted;
+    }
+    t := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// The title bar of a docked tool window (VS style).
+component ToolTitle inherits Rectangle {
+    in property <string> text;
+    in property <bool> show-dock: false;
+    callback closed();
+
+    height: AppTheme.title-height;
+    background: AppTheme.framed ? AppTheme.frame.darker(0.22) : AppTheme.surface;
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 2px;
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+            font-weight: AppTheme.framed ? 400 : 600;
+            color: AppTheme.framed ? AppTheme.frame-foreground : AppTheme.foreground;
+        }
+
+        if root.show-dock: TitleAction {
+            icon: WorkspaceApi.tree-right ? "arrow-left" : "arrow-right";
+            clicked => {
+                ShellApi.invoke(WorkspaceApi.tree-right ? "view.dock_left" : "view.dock_right");
+            }
+        }
+        TitleAction {
+            icon: "close";
+            clicked => {
+                root.closed();
+            }
+        }
+    }
+
+    if !AppTheme.framed: Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: AppTheme.border;
+    }
+}
+
+component TreeRowView inherits Rectangle {
+    in property <int> index;
+    in property <TreeItem> item;
+    in property <length> indent;
+    property <bool> selected: root.index == WorkspaceApi.tree-selected;
+
+    height: AppTheme.row-height;
+    background: root.selected ? AppTheme.accent.transparentize(AppTheme.dark ? 0.62 : 0.8)
+        : row.has-hover ? AppTheme.foreground.transparentize(0.93) : transparent;
+    animate background { duration: AppTheme.fast; easing: ease-out; }
+
+    if root.selected: Rectangle {
+        x: 0px;
+        width: 2px;
+        background: AppTheme.accent;
+    }
+
+    // Indent guides.
+    for level in root.item.depth: Rectangle {
+        x: 14px + level * root.indent;
+        width: 1px;
+        background: AppTheme.foreground.transparentize(0.86);
+    }
+
+    row := TouchArea {
+        clicked => {
+            WorkspaceApi.tree-clicked(root.index);
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 8px + root.item.depth * root.indent;
+        padding-right: 6px;
+        spacing: 4px;
+        VerticalLayout {
+            alignment: center;
+            width: 12px;
+            if root.item.is-dir && root.item.has-children: Icon {
+                // Some renderers ignore transforms on paths, so swap glyphs.
+                kind: root.item.expanded ? "chevron-down" : "chevron-right";
+                size: 12px;
+                color: AppTheme.foreground-muted;
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            FileIcon {
+                kind: root.item.icon;
+                expanded: root.item.expanded;
+            }
+        }
+
+        Rectangle {
+            width: 2px;
+        }
+
+        Text {
+            text: root.item.name;
+            vertical-alignment: center;
+            color: AppTheme.foreground;
+            font-weight: root.selected ? 600 : 400;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+    }
+}
+
+
+// ------------------------------------------------------ project explorer
+
+component ProjectExplorer inherits Rectangle {
+    property <length> indent: 14px;
+    property <int> focus-request: ShellApi.explorer-focus;
+    changed focus-request => {
+        filter.focus();
+    }
+
+    background: AppTheme.surface;
+
+    VerticalLayout {
+        ToolTitle {
+            text: "Project Explorer";
+            show-dock: true;
+            closed => {
+                ShellApi.invoke("view.project");
+            }
+        }
+
+        // Explorer toolbar.
+        Rectangle {
+            height: AppTheme.toolbar-height - 2px;
+            background: AppTheme.framed ? AppTheme.title-bar : AppTheme.surface;
+            HorizontalLayout {
+                padding-left: 3px;
+                padding-right: 3px;
+                padding-top: 1px;
+                padding-bottom: 1px;
+                spacing: 1px;
+                Cmd {
+                    icon: "new-file";
+                    command: "file.new_file";
+                    tooltip: "New File";
+                }
+
+                Cmd {
+                    icon: "new-folder";
+                    command: "file.new_folder";
+                    tooltip: "New Folder";
+                }
+
+                ToolSeparator { }
+
+                Cmd {
+                    icon: "refresh";
+                    command: "tools.refresh_project";
+                    tooltip: "Refresh";
+                }
+
+                IconButton {
+                    icon: "collapse-all";
+                    tooltip: "Collapse All";
+                    clicked => {
+                        WorkspaceApi.collapse-all();
+                    }
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+
+        // Search.
+        Rectangle {
+            height: AppTheme.control-height + 8px;
+            background: AppTheme.surface;
+            filter := ApexLineEdit {
+                x: 4px;
+                y: 3px;
+                width: parent.width - 8px;
+                height: AppTheme.control-height + 2px;
+                icon: "search";
+                placeholder: "Search Project Explorer (Ctrl+;)";
+                text <=> WorkspaceApi.tree-filter;
+                edited(t) => {
+                    WorkspaceApi.tree-filter-changed(t);
+                }
+            }
+        }
+
+        // New file / folder prompt.
+        if ShellApi.new-entry-kind != 0: Rectangle {
+            height: AppTheme.control-height + 10px;
+            background: AppTheme.surface;
+            HorizontalLayout {
+                padding-left: 6px;
+                padding-right: 4px;
+                padding-top: 2px;
+                padding-bottom: 4px;
+                spacing: 6px;
+                VerticalLayout {
+                    alignment: center;
+                    FileIcon {
+                        kind: ShellApi.new-entry-kind == 2 ? "folder" : "file";
+                    }
+                }
+                ApexLineEdit {
+                    height: AppTheme.control-height + 4px;
+                    placeholder: ShellApi.new-entry-kind == 2 ? "New folder name, then Enter" : "New file name, then Enter";
+                    init => {
+                        self.focus();
+                    }
+                    accepted(t) => {
+                        WorkspaceApi.create-entry(t, ShellApi.new-entry-kind == 2);
+                        ShellApi.new-entry-kind = 0;
+                    }
+                }
+                IconButton {
+                    icon: "close";
+                    tooltip: "Cancel";
+                    clicked => {
+                        ShellApi.new-entry-kind = 0;
+                    }
+                }
+            }
+        }
+
+        // Project root row.
+        Rectangle {
+            height: AppTheme.row-height + 2px;
+            background: AppTheme.surface;
+            HorizontalLayout {
+                padding-left: 8px;
+                spacing: 6px;
+                VerticalLayout {
+                    alignment: center;
+                    FileIcon {
+                        kind: "folder";
+                        expanded: true;
+                    }
+                }
+                Text {
+                    text: WorkspaceApi.project-name;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    color: AppTheme.foreground;
+                    horizontal-stretch: 1;
+                }
+                Text {
+                    text: WorkspaceApi.tree-filter != "" ? WorkspaceApi.tree.length + " matches" : "";
+                    vertical-alignment: center;
+                    font-size: AppTheme.ui-font-size - 1px;
+                    color: AppTheme.foreground-muted;
+                }
+                Rectangle {
+                    width: 6px;
+                }
+            }
+        }
+
+        // The tree: virtualized rows (only visible rows are instantiated).
+        ListView {
+            vertical-stretch: 1;
+            for item[i] in WorkspaceApi.tree: TreeRowView {
+                index: i;
+                item: item;
+                indent: root.indent;
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------ doc tabs
+
+component DocTab inherits Rectangle {
+    in property <string> title;
+    in property <bool> dirty;
+    in property <bool> active;
+    in property <string> icon;
+    callback select();
+    callback close();
+
+    width: min(240px, row.preferred-width);
+    property <color> text-color: root.active ? AppTheme.tab-active-foreground
+        : AppTheme.framed ? AppTheme.frame-foreground
+        : touch.has-hover ? AppTheme.foreground : AppTheme.foreground-muted;
+    background: root.active ? AppTheme.tab-active
+        : touch.has-hover ? (AppTheme.framed ? AppTheme.frame.brighter(0.18) : AppTheme.surface-alt)
+        : AppTheme.framed ? AppTheme.frame.darker(0.12) : transparent;
+    animate background { duration: AppTheme.fast; easing: ease-out; }
+
+    touch := TouchArea {
+        clicked => {
+            root.select();
+        }
+        pointer-event(e) => {
+            if e.button == PointerEventButton.middle && e.kind == PointerEventKind.up {
+                root.close();
+            }
+        }
+    }
+
+    row := HorizontalLayout {
+        padding-left: 9px;
+        padding-right: 3px;
+        spacing: 5px;
+        VerticalLayout {
+            alignment: center;
+            FileIcon {
+                kind: root.icon;
+                size: 14px;
+            }
+        }
+        Text {
+            text: root.title;
+            vertical-alignment: center;
+            overflow: elide;
+            font-weight: root.active ? 600 : 400;
+            color: root.text-color;
+        }
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 16px;
+                height: 16px;
+                border-radius: 3px;
+                background: close-touch.has-hover ? root.text-color.transparentize(0.82) : transparent;
+                animate background { duration: AppTheme.fast; }
+                // The dirty dot turns into a close glyph on hover.
+                if root.dirty && !close-touch.has-hover: Rectangle {
+                    width: 7px;
+                    height: 7px;
+                    border-radius: 3.5px;
+                    background: root.text-color;
+                }
+                if !root.dirty || close-touch.has-hover: Icon {
+                    kind: "close";
+                    size: 11px;
+                    color: root.active || touch.has-hover || close-touch.has-hover || AppTheme.framed ? root.text-color : transparent;
+                }
+                close-touch := TouchArea {
+                    clicked => {
+                        root.close();
+                    }
+                }
+            }
+        }
+    }
+
+    // Accent indicator for unframed themes; grows in when activated.
+    if !AppTheme.framed: Rectangle {
+        y: 0px;
+        x: (parent.width - self.width) / 2;
+        height: 2px;
+        width: root.active ? parent.width : 0px;
+        background: AppTheme.accent;
+        animate width { duration: AppTheme.normal; easing: ease-out; }
+    }
+    if !AppTheme.framed: Rectangle {
+        x: parent.width - 1px;
+        width: 1px;
+        background: AppTheme.border;
+    }
+}
+
+component TabStrip inherits Rectangle {
+    height: AppTheme.tab-height;
+    background: AppTheme.framed ? AppTheme.frame : AppTheme.background;
+
+    Flickable {
+        content-width: max(self.width, tabs.preferred-width);
+        tabs := HorizontalLayout {
+            alignment: start;
+            spacing: AppTheme.framed ? 1px : 0px;
+            for tab[i] in WorkspaceApi.tabs: DocTab {
+                title: tab.title;
+                dirty: tab.dirty;
+                active: i == WorkspaceApi.active-tab;
+                icon: FileKinds.of(tab.title);
+                select => {
+                    WorkspaceApi.select-tab(i);
+                }
+                close => {
+                    WorkspaceApi.close-tab(i);
+                }
+            }
+        }
+    }
+
+    // Underline joining the active tab to the document (VS framed look).
+    Rectangle {
+        y: parent.height - 2px;
+        height: 2px;
+        background: AppTheme.framed && WorkspaceApi.active-tab >= 0 ? AppTheme.tab-active : transparent;
+    }
+    if !AppTheme.framed: Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: AppTheme.border;
+    }
+}
+
+// ----------------------------------------------------- bottom tool area
+
+component ToolTab inherits Rectangle {
+    in property <string> text;
+    in property <string> icon;
+    in property <int> index;
+    in property <string> command;
+    property <bool> active: ToolsApi.tool-open && ToolsApi.tool-tab == root.index;
+
+    width: row.preferred-width;
+    background: root.active ? (AppTheme.framed ? AppTheme.surface : AppTheme.editor-background)
+        : touch.has-hover ? (AppTheme.framed ? AppTheme.frame.brighter(0.18) : AppTheme.surface-alt)
+        : transparent;
+    animate background { duration: AppTheme.fast; easing: ease-out; }
+
+    touch := TouchArea {
+        clicked => {
+            ShellApi.invoke(root.command);
+        }
+    }
+
+    row := HorizontalLayout {
+        padding-left: 9px;
+        padding-right: 11px;
+        spacing: 5px;
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                kind: root.icon;
+                size: 12px;
+                color: root.active ? AppTheme.accent : AppTheme.framed ? AppTheme.frame-foreground : AppTheme.foreground-muted;
+            }
+        }
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            color: root.active ? AppTheme.foreground : AppTheme.framed ? AppTheme.frame-foreground : AppTheme.foreground-muted;
+        }
+    }
+
+    if !AppTheme.framed: Rectangle {
+        y: parent.height - 2px;
+        x: (parent.width - self.width) / 2;
+        height: 2px;
+        width: root.active ? parent.width : 0px;
+        background: AppTheme.accent;
+        animate width { duration: AppTheme.normal; easing: ease-out; }
+    }
+}
+
+component StatusBar inherits Rectangle {
+    height: AppTheme.status-height;
+    background: AppTheme.status-bar;
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 10px;
+        spacing: 16px;
+
+        HorizontalLayout {
+            spacing: 6px;
+            horizontal-stretch: 1;
+            VerticalLayout {
+                alignment: center;
+                Icon {
+                    kind: AppApi.notice-kind == 2 ? "error" : AppApi.notice-kind == 1 ? "warning" : AppApi.notice == "" ? "panel-bottom" : "info";
+                    size: 12px;
+                    color: AppTheme.status-bar-foreground;
+                }
+            }
+            Text {
+                text: ShellApi.pending-chord != "" ? ShellApi.pending-chord
+                    : AppApi.notice == "" ? (ToolsApi.running ? "Running " + ToolsApi.run-title : "Ready") : AppApi.notice;
+                vertical-alignment: center;
+                overflow: elide;
+                horizontal-stretch: 1;
+                color: AppTheme.status-bar-foreground;
+            }
+        }
+
+        Text {
+            text: WorkspaceApi.lsp-text;
+            vertical-alignment: center;
+            color: AppTheme.status-bar-foreground;
+        }
+
+        HorizontalLayout {
+            spacing: 5px;
+            VerticalLayout {
+                alignment: center;
+                FileIcon {
+                    kind: "python";
+                    size: 12px;
+                }
+            }
+            Text {
+                text: WorkspaceApi.interpreter-text;
+                vertical-alignment: center;
+                color: AppTheme.status-bar-foreground;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 5px;
+            VerticalLayout {
+                alignment: center;
+                Icon {
+                    kind: "folder";
+                    size: 12px;
+                    color: AppTheme.status-bar-foreground;
+                }
+            }
+            Text {
+                text: WorkspaceApi.project-name;
+                vertical-alignment: center;
+                color: AppTheme.status-bar-foreground;
+            }
+        }
+    }
+}
+
+// The explorer in a clipped slot whose width animates on show/hide; the
+// explorer keeps its own width so its content does not reflow mid-slide.
+component ExplorerSlot inherits Rectangle {
+    in property <float> t;
+    in property <bool> right;
+    clip: true;
+    width: WorkspaceApi.tree-width * root.t;
+    ProjectExplorer {
+        x: root.right ? 0px : root.width - WorkspaceApi.tree-width;
+        width: WorkspaceApi.tree-width;
+        height: root.height;
+    }
+}
+
+// ------------------------------------------------------------- screen
+
+export component WorkspaceScreen inherits Rectangle {
+    property <length> tool-height: 230px;
+    property <length> gap: AppTheme.framed ? 3px : 0px;
+    // Animated 0..1 reveal factors for the side and bottom panels.
+    property <float> explorer-t: WorkspaceApi.tree-visible ? 1 : 0;
+    animate explorer-t { duration: AppTheme.normal; easing: ease-out; }
+    property <float> tool-t: ToolsApi.tool-open ? 1 : 0;
+    animate tool-t { duration: AppTheme.normal; easing: ease-out; }
+
+    background: AppTheme.framed ? AppTheme.frame : AppTheme.background;
+
+    VerticalLayout {
+        MenuBar { }
+
+        if ShellApi.toolbar-visible: Toolbar { }
+
+        // Dock area.
+        HorizontalLayout {
+            vertical-stretch: 1;
+            padding-left: root.gap;
+            padding-right: root.gap;
+            padding-top: root.gap;
+
+            if !WorkspaceApi.tree-right && root.explorer-t > 0: ExplorerSlot {
+                t: root.explorer-t;
+                right: false;
+            }
+
+            if !WorkspaceApi.tree-right && WorkspaceApi.tree-visible: Splitter {
+                width: 5px;
+                dragged(delta) => {
+                    WorkspaceApi.tree-width = clamp(WorkspaceApi.tree-width + delta, 160px, root.width - 420px);
+                }
+                released => {
+                    WorkspaceApi.tree-layout-changed();
+                }
+            }
+
+            // Document well + bottom tool window.
+            VerticalLayout {
+                horizontal-stretch: 1;
+
+                // Tab strips live in each editor group (EditorArea).
+                if WorkspaceApi.active-tab < 0: TabStrip { }
+
+                if WorkspaceApi.active-tab < 0: Rectangle {
+                    vertical-stretch: 1;
+                    background: AppTheme.editor-background;
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 8px;
+                        HorizontalLayout {
+                            alignment: center;
+                            AppLogo {
+                                size: 48px;
+                                opacity: 0.85;
+                            }
+                        }
+                        Text {
+                            text: "No file open";
+                            horizontal-alignment: center;
+                            font-size: 17px;
+                            font-weight: 600;
+                            color: AppTheme.foreground;
+                        }
+
+                        HorizontalLayout {
+                            alignment: center;
+                            padding-top: 6px;
+                            GridLayout {
+                                spacing-horizontal: 18px;
+                                spacing-vertical: 5px;
+                                Row {
+                                    Text { text: "Search Everywhere"; color: AppTheme.foreground-muted; }
+                                    Text { text: "Double Shift"; color: AppTheme.accent; font-family: AppTheme.code-font; }
+                                }
+                                Row {
+                                    Text { text: "Go to File"; color: AppTheme.foreground-muted; }
+                                    Text { text: "Ctrl+Shift+O"; color: AppTheme.accent; font-family: AppTheme.code-font; }
+                                }
+                                Row {
+                                    Text { text: "Find in Files"; color: AppTheme.foreground-muted; }
+                                    Text { text: "Ctrl+Shift+F"; color: AppTheme.accent; font-family: AppTheme.code-font; }
+                                }
+                                Row {
+                                    Text { text: "Command Palette"; color: AppTheme.foreground-muted; }
+                                    Text { text: "Ctrl+Shift+P"; color: AppTheme.accent; font-family: AppTheme.code-font; }
+                                }
+                                Row {
+                                    Text { text: "Project Explorer"; color: AppTheme.foreground-muted; }
+                                    Text { text: "Alt+1"; color: AppTheme.accent; font-family: AppTheme.code-font; }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if WorkspaceApi.active-tab >= 0: EditorArea {
+                    vertical-stretch: 1;
+                }
+
+                if ToolsApi.tool-open: Splitter {
+                    vertical: true;
+                    height: 5px;
+                    dragged(delta) => {
+                        root.tool-height = clamp(root.tool-height - delta, 100px, root.height - 220px);
+                    }
+                }
+
+                if root.tool-t > 0: Rectangle {
+                    height: root.tool-height * root.tool-t;
+                    clip: true;
+                    background: AppTheme.surface;
+                    VerticalLayout {
+                        y: 0px;
+                        height: root.tool-height;
+                        ToolTitle {
+                            text: ToolsApi.tool-tab == 0 ? "Output" : ToolsApi.tool-tab == 1 ? "Problems" : ToolsApi.tool-tab == 2 ? "Databases" : ToolsApi.tool-tab == 3 ? "Plugins" : "Find in Files";
+                            closed => {
+                                ToolsApi.tool-open = false;
+                            }
+                        }
+                        Rectangle {
+                            vertical-stretch: 1;
+                            if ToolsApi.tool-tab == 0: RunPanel { }
+                            if ToolsApi.tool-tab == 1: ProblemsPanel { }
+                            if ToolsApi.tool-tab == 2: DatabasePanel { }
+                            if ToolsApi.tool-tab == 3: PluginsPanel { }
+                            if ToolsApi.tool-tab == 4: FindPanel { }
+                        }
+                    }
+                }
+            }
+
+            if WorkspaceApi.tree-right && WorkspaceApi.tree-visible: Splitter {
+                width: 5px;
+                dragged(delta) => {
+                    WorkspaceApi.tree-width = clamp(WorkspaceApi.tree-width - delta, 160px, root.width - 420px);
+                }
+                released => {
+                    WorkspaceApi.tree-layout-changed();
+                }
+            }
+
+            if WorkspaceApi.tree-right && root.explorer-t > 0: ExplorerSlot {
+                t: root.explorer-t;
+                right: true;
+            }
+        }
+
+        // Tool window tabs along the bottom edge (VS style).
+        Rectangle {
+            height: AppTheme.tab-height - 2px;
+            background: AppTheme.framed ? AppTheme.frame : AppTheme.background;
+            HorizontalLayout {
+                padding-left: root.gap;
+                alignment: start;
+                ToolTab {
+                    text: "Output";
+                    icon: "terminal";
+                    index: 0;
+                    command: "view.output";
+                }
+
+                ToolTab {
+                    text: ToolsApi.problems.length > 0 ? "Problems (" + ToolsApi.problems.length + ")" : "Problems";
+                    icon: "warning";
+                    index: 1;
+                    command: "view.problems";
+                }
+
+                ToolTab {
+                    text: "Find in Files";
+                    icon: "find-files";
+                    index: 4;
+                    command: "edit.find_in_files";
+                }
+
+                ToolTab {
+                    text: "Databases";
+                    icon: "database";
+                    index: 2;
+                    command: "view.databases";
+                }
+
+                ToolTab {
+                    text: "Plugins";
+                    icon: "plugin";
+                    index: 3;
+                    command: "view.plugins";
+                }
+            }
+            if !AppTheme.framed: Rectangle {
+                y: 0px;
+                height: 1px;
+                background: AppTheme.border;
+            }
+        }
+
+        if ShellApi.status-visible: StatusBar { }
+    }
+
+    if WorkspaceApi.confirm-conflict >= 0: Modal {
+        title: "File changed on disk";
+        message: (WorkspaceApi.confirm-conflict < WorkspaceApi.tabs.length
+            ? WorkspaceApi.tabs[WorkspaceApi.confirm-conflict].title
+            : "This file") + " was changed by another program. Reload it (your edits are undoable), or overwrite their changes?";
+        ApexButton {
+            text: "Cancel";
+            clicked => {
+                WorkspaceApi.conflict-cancel();
+            }
+        }
+
+        ApexButton {
+            text: "Reload";
+            clicked => {
+                WorkspaceApi.conflict-reload();
+            }
+        }
+
+        ApexButton {
+            text: "Overwrite";
+            kind: 1;
+            clicked => {
+                WorkspaceApi.conflict-overwrite();
+            }
+        }
+    }
+
+    if WorkspaceApi.confirm-close >= 0: Modal {
+        title: "Save changes?";
+        message: WorkspaceApi.confirm-close < WorkspaceApi.tabs.length
+            ? WorkspaceApi.tabs[WorkspaceApi.confirm-close].title + " has unsaved changes."
+            : "This file has unsaved changes.";
+        ApexButton {
+            text: "Cancel";
+            clicked => {
+                WorkspaceApi.confirm-close-cancel();
+            }
+        }
+
+        ApexButton {
+            text: "Don't Save";
+            clicked => {
+                WorkspaceApi.confirm-close-discard();
+            }
+        }
+
+        ApexButton {
+            text: "Save";
+            kind: 1;
+            clicked => {
+                WorkspaceApi.confirm-close-save();
+            }
+        }
+    }
+}

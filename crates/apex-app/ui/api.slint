@@ -1,0 +1,292 @@
+// The contract between the Slint views and the Rust controllers.
+//
+// Each global groups the state and callbacks of one area of the IDE. Rust
+// writes the properties and handles the callbacks (see src/app.rs and the
+// area modules); views only read properties and invoke callbacks, so no
+// view needs properties threaded through its parents.
+
+// ---------------------------------------------------------------- structs
+
+export struct RecentProject {
+    name: string,
+    initial: string,
+    path: string,
+    missing: bool,
+}
+
+export struct TemplateCard {
+    id: string,
+    name: string,
+    description: string,
+    packages: string,
+}
+
+// state: 0 pending, 1 running, 2 done, 3 skipped, 4 failed
+export struct StepRow {
+    label: string,
+    state: int,
+    note: string,
+}
+
+export struct TreeItem {
+    name: string,
+    depth: int,
+    is-dir: bool,
+    expanded: bool,
+    has-children: bool,
+    // File-type glyph for FileIcon (see theming::file_icon_kind).
+    icon: string,
+}
+
+export struct EditorTab {
+    title: string,
+    path: string,
+    dirty: bool,
+}
+
+export struct HlRun {
+    text: string,
+    color: color,
+    bold: bool,
+    italic: bool,
+}
+
+export struct HlLine {
+    number: int,
+    runs: [HlRun],
+}
+
+// kind: 0 stdout, 1 stderr, 2 IDE message
+export struct OutputLine {
+    text: string,
+    kind: int,
+}
+
+// severity: 1 error, 2 warning, 3 information, 4 hint
+export struct Problem {
+    severity: int,
+    message: string,
+    location: string,
+    source: string,
+}
+
+export struct DriverCard {
+    id: string,
+    name: string,
+    category: string,
+    logo: image,
+    has-logo: bool,
+    brand: color,
+    available: bool,
+}
+
+export struct DbTable {
+    name: string,
+    kind: string,
+}
+
+export struct ResultRow {
+    cells: [string],
+}
+
+export struct PluginRow {
+    id: string,
+    name: string,
+    version: string,
+    description: string,
+    enabled: bool,
+    status: string,
+    failed: bool,
+    // "Permissions: fs-read (not granted)", or empty.
+    permissions: string,
+    needs-grant: bool,
+}
+
+export struct CommandRow {
+    id: string,
+    title: string,
+    plugin: string,
+    keybinding: string,
+}
+
+// ---------------------------------------------------------------- globals
+
+// screen: 0 welcome, 1 new project, 2 workspace
+// notice-kind: 0 info, 1 warning, 2 error, 3 success
+export global AppApi {
+    in-out property <int> screen: 0;
+    in-out property <string> notice;
+    in-out property <int> notice-kind;
+    in-out property <[string]> theme-names;
+    in-out property <int> theme-index;
+    in-out property <bool> confirm-quit;
+    callback select-theme(int);
+    callback dismiss-notice();
+    callback quit-save-all();
+    callback quit-discard();
+}
+
+export global WelcomeApi {
+    in-out property <[RecentProject]> recent;
+    in-out property <string> open-path;
+    callback new-project();
+    callback open-folder(string);
+    callback open-recent(int);
+    callback remove-recent(int);
+}
+
+// env-mode: 0 new uv environment with a Python version, 1 from a base interpreter
+export global NewProjectApi {
+    in-out property <string> name: "untitled";
+    in-out property <string> location;
+    in-out property <[TemplateCard]> templates;
+    in-out property <int> template-index: 0;
+    in-out property <int> env-mode: 0;
+    in-out property <[string]> python-versions: ["3.13", "3.12", "3.11", "3.10"];
+    in-out property <int> version-index: 1;
+    in-out property <[string]> interpreter-labels;
+    in-out property <int> interpreter-index: -1;
+    in-out property <bool> discovering;
+    in-out property <string> uv-status;
+    in-out property <bool> install-packages: true;
+    in-out property <string> target-path;
+    in-out property <string> validation;
+    in-out property <bool> busy;
+    in-out property <bool> failed;
+    in-out property <[StepRow]> steps;
+    in-out property <[string]> log;
+    callback changed();
+    callback create();
+    callback cancel();
+}
+
+export global WorkspaceApi {
+    in-out property <string> project-name;
+    in-out property <string> project-path;
+
+    in-out property <[TreeItem]> tree;
+    in-out property <int> tree-selected: -1;
+    callback tree-clicked(int);
+    callback refresh-tree();
+    callback close-project();
+    // Project explorer layout; Rust restores these from Settings and saves
+    // them when `tree-layout-changed` fires.
+    in-out property <bool> tree-visible: true;
+    in-out property <length> tree-width: 280px;
+    in-out property <bool> tree-right: true;
+    callback tree-layout-changed();
+    callback collapse-all();
+    // Creates a file (or folder when the bool is true) next to the selected
+    // tree entry, or in the project root.
+    callback create-entry(string, bool);
+    in-out property <string> tree-filter;
+    callback tree-filter-changed(string);
+
+    in-out property <[EditorTab]> tabs;
+    in-out property <int> active-tab: -1;
+    in-out property <int> confirm-close: -1;
+    callback select-tab(int);
+    callback close-tab(int);
+    callback confirm-close-save();
+    callback confirm-close-discard();
+    callback confirm-close-cancel();
+    // Index of a tab whose file another program changed, or -1.
+    in-out property <int> confirm-conflict: -1;
+    callback conflict-overwrite();
+    callback conflict-reload();
+    callback conflict-cancel();
+
+    // The editor: text and gutter, plus a selection request that the code
+    // editor applies whenever `selection-serial` changes.
+    in-out property <string> editor-text;
+    in-out property <string> gutter-text: "1";
+    in-out property <int> selection-anchor;
+    in-out property <int> selection-caret;
+    in-out property <int> selection-serial;
+    in-out property <bool> selection-reset-scroll;
+    in-out property <bool> highlight-mode;
+    in-out property <bool> can-highlight;
+    in-out property <[HlLine]> highlighted;
+    callback toggle-highlight();
+    callback edited(string);
+    // text, ctrl, shift, alt, anchor, caret -> handled
+    callback editor-key(string, bool, bool, bool, int, int) -> bool;
+    callback caret-moved(int);
+    callback save();
+
+    in-out property <[string]> run-configs;
+    in-out property <int> run-config-index;
+    callback select-run-config(int);
+
+    // Interpreter drop-down: discovered interpreters (scanned when first
+    // opened), the one in use, and whether a scan is running.
+    in-out property <[string]> interpreter-choices;
+    in-out property <int> interpreter-choice: -1;
+    in-out property <bool> interpreters-scanning;
+    callback interpreter-opening();
+    callback select-interpreter(int);
+
+    // status bar
+    in-out property <string> caret-text;
+    in-out property <string> interpreter-text;
+    in-out property <string> lsp-text;
+    in-out property <string> file-info-text;
+}
+
+// tool-tab: 0 run, 1 problems, 2 databases, 3 plugins
+export global ToolsApi {
+    in-out property <int> tool-tab: 0;
+    in-out property <bool> tool-open: true;
+
+    in-out property <[OutputLine]> output;
+    in-out property <bool> running;
+    in-out property <string> run-title;
+    callback run();
+    callback stop();
+    callback clear-output();
+    callback send-input(string);
+    // The program ended while its input box had the keys: give them back
+    // to the editor (a disabled box swallows typing).
+    callback input-finished();
+
+    in-out property <[Problem]> problems;
+    in-out property <int> error-count;
+    in-out property <bool> lsp-missing;
+    in-out property <string> lsp-hint;
+    callback open-problem(int);
+}
+
+export global DbApi {
+    in-out property <[DriverCard]> drivers;
+    callback driver-clicked(int);
+
+    in-out property <string> path;
+    // Create the database file if it does not exist.
+    in-out property <bool> create-new;
+    in-out property <bool> connected;
+    in-out property <bool> busy;
+    in-out property <string> connection-label;
+    in-out property <[DbTable]> tables;
+    callback connect();
+    callback disconnect();
+    callback table-clicked(int);
+
+    in-out property <string> sql: "SELECT sqlite_version();";
+    in-out property <[string]> columns;
+    in-out property <[ResultRow]> rows;
+    in-out property <string> result-status;
+    in-out property <bool> result-error;
+    callback execute();
+    // Interrupts the running query.
+    callback cancel();
+}
+
+export global PluginsApi {
+    in-out property <[PluginRow]> plugins;
+    in-out property <[CommandRow]> commands;
+    in-out property <string> plugins-dir;
+    callback set-enabled(int, bool);
+    callback run-command(int);
+    // Grants the permissions plugin `int` requests.
+    callback grant-permissions(int);
+}

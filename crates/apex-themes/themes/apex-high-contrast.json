@@ -1,0 +1,44 @@
+{
+  "id": "apex-high-contrast",
+  "name": "Apex High Contrast",
+  "kind": "dark",
+  "ui": {
+    "background": "#000000",
+    "surface": "#0a0a0a",
+    "surface_alt": "#1a1a1a",
+    "border": "#6fc3df",
+    "foreground": "#ffffff",
+    "foreground_muted": "#d0d0d0",
+    "accent": "#1aebff",
+    "accent_foreground": "#000000",
+    "selection": "#0050b3",
+    "error": "#ff7b7b",
+    "warning": "#ffd000",
+    "success": "#5af78e",
+    "editor_background": "#000000",
+    "editor_foreground": "#ffffff",
+    "gutter_foreground": "#c0c0c0",
+    "line_highlight": "#1a1a1a"
+  },
+  "syntax": {
+    "keyword": {
+      "color": "#ffa657",
+      "bold": true
+    },
+    "string": "#7ee787",
+    "number": "#79c0ff",
+    "comment": {
+      "color": "#b0b0b0",
+      "italic": true
+    },
+    "function": "#ffe066",
+    "type": "#4fe0e0",
+    "variable": "#ffffff",
+    "constant": "#ff8cf0",
+    "operator": "#ffffff",
+    "punctuation": "#e0e0e0",
+    "decorator": "#d2a8ff",
+    "builtin": "#a5d6ff",
+    "plain": "#ffffff"
+  }
+}

@@ -1,0 +1,16 @@
+# Example declarative plugin: contributes a colour theme and a file type.
+# Copy this folder into your Apex IDE plugins directory to try it.
+id = "com.example.sample-theme"
+name = "Sample Midnight Theme"
+version = "0.1.0"
+apex_api = "^0.1"
+description = "A dark blue theme, shipped as an example of a declarative plugin."
+authors = ["Apex IDE contributors"]
+permissions = []
+
+[contributes]
+themes = ["themes/sample-midnight.json"]
+
+[[contributes.languages]]
+id = "jinja"
+extensions = ["j2", "jinja"]

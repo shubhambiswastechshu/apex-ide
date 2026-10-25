@@ -1,0 +1,20 @@
+[package]
+name = "apex-editor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+# Default features are disabled on purpose: ropey's `unicode_lines` feature
+# treats form feed, NEL, U+2028 and friends as line breaks, which would make
+# our line numbers disagree with Python tracebacks and language servers.
+# The buffer normalises CR/CRLF to LF itself, so plain LF counting is right.
+ropey = { version = "1.6", default-features = false, features = ["simd"] }
+tree-sitter.workspace = true
+tree-sitter-python.workspace = true
+thiserror.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

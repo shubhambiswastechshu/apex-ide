@@ -1,0 +1,842 @@
+// The bottom tool windows: Run, Problems, Databases and Plugins.
+
+import { ListView, ScrollView } from "std-widgets.slint";
+import { AppTheme } from "theme.slint";
+import { ToolsApi, DbApi, PluginsApi } from "api.slint";
+import { ShellApi } from "shell_api.slint";
+import { ApexButton, IconButton, ApexLineEdit, ApexCheckBox, ApexSwitch, Badge, SectionTitle, Icon, FileIcon } from "widgets.slint";
+
+export component RunPanel inherits VerticalLayout {
+    property <bool> running: ToolsApi.running;
+    changed running => {
+        if !self.running && stdin.has-focus {
+            ToolsApi.input-finished();
+        }
+    }
+
+    HorizontalLayout {
+        padding: 3px;
+        padding-left: 6px;
+        spacing: 2px;
+        IconButton {
+            icon: "play";
+            icon-color: #1f9d3a;
+            tooltip: "Run";
+            enabled: !ToolsApi.running;
+            clicked => {
+                ToolsApi.run();
+            }
+        }
+
+        IconButton {
+            icon: "stop";
+            icon-color: #d13438;
+            tooltip: "Stop";
+            enabled: ToolsApi.running;
+            clicked => {
+                ToolsApi.stop();
+            }
+        }
+
+        IconButton {
+            icon: "trash";
+            tooltip: "Clear output";
+            clicked => {
+                ToolsApi.clear-output();
+            }
+        }
+
+        Rectangle {
+            width: 8px;
+        }
+
+        if ToolsApi.running: VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                background: AppTheme.success;
+            }
+        }
+
+        Text {
+            text: ToolsApi.run-title == "" ? "Show output from: Run" : ToolsApi.run-title;
+            vertical-alignment: center;
+            color: AppTheme.foreground-muted;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+    }
+
+    Rectangle {
+        height: 1px;
+        background: AppTheme.border;
+    }
+
+    Rectangle {
+        vertical-stretch: 1;
+        background: AppTheme.editor-background;
+
+        output := ListView {
+            property <int> count: ToolsApi.output.length;
+            changed count => {
+                self.content-y = min(0px, self.visible-height - self.count * 18px);
+            }
+            for line in ToolsApi.output: Rectangle {
+                height: 18px;
+                Text {
+                    x: 8px;
+                    text: line.text;
+                    vertical-alignment: center;
+                    font-family: AppTheme.code-font;
+                    font-size: 12px;
+                    color: line.kind == 1 ? AppTheme.error : line.kind == 2 ? AppTheme.foreground-muted : AppTheme.editor-foreground;
+                }
+            }
+        }
+    }
+
+    HorizontalLayout {
+        padding: 6px;
+        spacing: 6px;
+        stdin := ApexLineEdit {
+            icon: "arrow-right";
+            height: 28px;
+            placeholder: ToolsApi.running ? "Input for the program (Enter sends a line)" : "The program is not running";
+            enabled: ToolsApi.running;
+            mono: true;
+            accepted(text) => {
+                ToolsApi.send-input(text);
+                self.text = "";
+            }
+        }
+    }
+}
+
+export component ProblemsPanel inherits VerticalLayout {
+    padding: 6px;
+    spacing: 6px;
+
+    if ToolsApi.lsp-missing: Rectangle {
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: AppTheme.warning.transparentize(0.4);
+        background: AppTheme.warning.transparentize(0.92);
+        height: hint.preferred-height;
+        hint := VerticalLayout {
+            padding: 12px;
+            spacing: 6px;
+            Text {
+                text: "No Python language server found";
+                font-weight: 700;
+                color: AppTheme.foreground;
+            }
+
+            Text {
+                text: ToolsApi.lsp-hint;
+                wrap: word-wrap;
+                color: AppTheme.foreground-muted;
+            }
+
+            Text {
+                text: "uv tool install basedpyright";
+                font-family: AppTheme.code-font;
+                color: AppTheme.accent;
+            }
+        }
+    }
+
+    if !ToolsApi.lsp-missing: Text {
+        text: ToolsApi.lsp-hint;
+        color: AppTheme.foreground-muted;
+        font-size: 11px;
+    }
+
+    ListView {
+        vertical-stretch: 1;
+        for p[i] in ToolsApi.problems: Rectangle {
+            height: 26px;
+            border-radius: 4px;
+            background: p-touch.has-hover ? AppTheme.foreground.transparentize(0.93) : transparent;
+            p-touch := TouchArea {
+                mouse-cursor: MouseCursor.pointer;
+                clicked => {
+                    ToolsApi.open-problem(i);
+                }
+            }
+
+            HorizontalLayout {
+                padding-left: 8px;
+                spacing: 8px;
+                VerticalLayout {
+                    alignment: center;
+                    Icon {
+                        kind: p.severity == 1 ? "error" : p.severity == 2 ? "warning" : "info";
+                        size: 14px;
+                        color: p.severity == 1 ? AppTheme.error : p.severity == 2 ? AppTheme.warning : AppTheme.accent;
+                    }
+                }
+
+                Text {
+                    text: p.message;
+                    vertical-alignment: center;
+                    color: AppTheme.foreground;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+
+                Text {
+                    text: p.location;
+                    vertical-alignment: center;
+                    color: AppTheme.foreground-muted;
+                    font-size: 11px;
+                }
+
+                Text {
+                    text: p.source;
+                    vertical-alignment: center;
+                    color: AppTheme.foreground-muted;
+                    font-size: 11px;
+                }
+
+                Rectangle {
+                    width: 4px;
+                }
+            }
+        }
+    }
+}
+
+component DriverTile inherits Rectangle {
+    in property <string> name;
+    in property <string> category;
+    in property <image> logo;
+    in property <bool> has-logo;
+    in property <color> brand;
+    in property <bool> available;
+    callback clicked();
+
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: touch.has-hover ? root.brand : AppTheme.border;
+    background: AppTheme.surface;
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    HorizontalLayout {
+        padding: 8px;
+        spacing: 8px;
+        // A light chip behind the logo keeps dark brand colors visible.
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 32px;
+                height: 32px;
+                border-radius: 6px;
+                background: #f4f5f7;
+                if root.has-logo: Image {
+                    width: 22px;
+                    height: 22px;
+                    source: root.logo;
+                }
+                if !root.has-logo: Text {
+                    width: 100%;
+                    height: 100%;
+                    text: root.name;
+                    color: root.brand;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    overflow: clip;
+                }
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: root.name;
+                font-weight: 600;
+                color: AppTheme.foreground;
+                overflow: elide;
+            }
+
+            HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+                Text {
+                    text: root.category;
+                    font-size: 11px;
+                    color: AppTheme.foreground-muted;
+                    vertical-alignment: center;
+                }
+
+                Badge {
+                    text: root.available ? "Ready" : "Planned";
+                    tone: root.available ? AppTheme.success : AppTheme.foreground-muted;
+                }
+            }
+        }
+    }
+}
+
+export component DatabasePanel inherits HorizontalLayout {
+    property <length> tile-width: 196px;
+    property <length> tile-height: 56px;
+    property <length> gap: 8px;
+
+    padding: 6px;
+    spacing: 10px;
+
+    // Catalog.
+    VerticalLayout {
+        horizontal-stretch: 1;
+        spacing: 6px;
+        SectionTitle {
+            text: "DATABASE DRIVERS";
+        }
+
+        catalog := ScrollView {
+            property <int> columns: max(1, floor((self.visible-width + root.gap) / (root.tile-width + root.gap)));
+            vertical-stretch: 1;
+            content-height: ceil(DbApi.drivers.length / self.columns) * (root.tile-height + root.gap);
+            for d[i] in DbApi.drivers: DriverTile {
+                x: mod(i, catalog.columns) * (root.tile-width + root.gap);
+                y: floor(i / catalog.columns) * (root.tile-height + root.gap);
+                width: root.tile-width;
+                height: root.tile-height;
+                name: d.name;
+                category: d.category;
+                logo: d.logo;
+                has-logo: d.has-logo;
+                brand: d.brand;
+                available: d.available;
+                clicked => {
+                    DbApi.driver-clicked(i);
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        width: 1px;
+        background: AppTheme.border;
+    }
+
+    // SQLite console.
+    VerticalLayout {
+        horizontal-stretch: 1;
+        spacing: 6px;
+        SectionTitle {
+            text: DbApi.connected ? "SQLITE: " + DbApi.connection-label : "SQLITE CONSOLE";
+        }
+
+        HorizontalLayout {
+            spacing: 6px;
+            ApexLineEdit {
+                text <=> DbApi.path;
+                placeholder: "Path to a .db file, or :memory:";
+                mono: true;
+                enabled: !DbApi.connected && !DbApi.busy;
+                accepted => {
+                    DbApi.connect();
+                }
+            }
+
+            if !DbApi.connected: ApexCheckBox {
+                text: "Create if missing";
+                checked <=> DbApi.create-new;
+                enabled: !DbApi.busy;
+            }
+            if !DbApi.connected: ApexButton {
+                text: "Connect";
+                kind: 1;
+                enabled: !DbApi.busy && DbApi.path != "";
+                clicked => {
+                    DbApi.connect();
+                }
+            }
+            // Stays enabled while busy: it cancels a running query first.
+            if DbApi.connected: ApexButton {
+                text: "Disconnect";
+                clicked => {
+                    DbApi.disconnect();
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 6px;
+            vertical-stretch: 1;
+
+            // Tables.
+            Rectangle {
+                width: 150px;
+                border-radius: 4px;
+                background: AppTheme.surface;
+                ListView {
+                    for t[i] in DbApi.tables: Rectangle {
+                        height: 22px;
+                        background: t-touch.has-hover ? AppTheme.surface-alt : transparent;
+                        t-touch := TouchArea {
+                            mouse-cursor: MouseCursor.pointer;
+                            clicked => {
+                                DbApi.table-clicked(i);
+                            }
+                        }
+
+                        Rectangle {
+                            x: 8px;
+                            width: 9px;
+                            height: 9px;
+                            border-radius: 2px;
+                            border-width: 1.5px;
+                            border-color: t.kind == "view" ? AppTheme.warning : AppTheme.accent;
+                            background: t.kind == "view" ? transparent : AppTheme.accent.transparentize(0.5);
+                        }
+
+                        Text {
+                            x: 24px;
+                            text: t.name;
+                            vertical-alignment: center;
+                            color: AppTheme.foreground;
+                            overflow: elide;
+                            width: parent.width - 28px;
+                        }
+                    }
+                }
+            }
+
+            VerticalLayout {
+                spacing: 6px;
+                Rectangle {
+                    height: 70px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: sql.has-focus ? AppTheme.accent : AppTheme.border;
+                    background: AppTheme.editor-background;
+                    clip: true;
+                    sql := TextInput {
+                        x: 6px;
+                        y: 4px;
+                        width: parent.width - 12px;
+                        height: parent.height - 8px;
+                        single-line: false;
+                        wrap: word-wrap;
+                        text <=> DbApi.sql;
+                        font-family: AppTheme.code-font;
+                        color: AppTheme.editor-foreground;
+                        selection-background-color: AppTheme.selection;
+                        enabled: DbApi.connected;
+                        key-pressed(event) => {
+                            if event.modifiers.control && event.text == Key.Return {
+                                DbApi.execute();
+                                return accept;
+                            }
+                            reject
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    ApexButton {
+                        text: "Execute  (Ctrl+Enter)";
+                        compact: true;
+                        kind: 1;
+                        enabled: DbApi.connected && !DbApi.busy;
+                        clicked => {
+                            DbApi.execute();
+                        }
+                    }
+
+                    if DbApi.busy && DbApi.connected: ApexButton {
+                        text: "Cancel";
+                        compact: true;
+                        clicked => {
+                            DbApi.cancel();
+                        }
+                    }
+
+                    Text {
+                        text: DbApi.result-status;
+                        vertical-alignment: center;
+                        color: DbApi.result-error ? AppTheme.error : AppTheme.foreground-muted;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                }
+
+                // Results grid.
+                results := Rectangle {
+                    vertical-stretch: 1;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: AppTheme.border;
+                    background: AppTheme.editor-background;
+                    clip: true;
+
+                    property <length> cell-width: 150px;
+                    property <length> grid-width: max(self.width, DbApi.columns.length * self.cell-width);
+
+                    header := Rectangle {
+                        x: grid.content-x;
+                        y: 0px;
+                        width: parent.grid-width;
+                        height: 24px;
+                        background: AppTheme.surface;
+                        for c[ci] in DbApi.columns: Text {
+                            x: ci * results.cell-width + 6px;
+                            width: results.cell-width - 12px;
+                            height: parent.height;
+                            text: c;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                            color: AppTheme.foreground;
+                            overflow: elide;
+                        }
+                    }
+
+                    grid := ListView {
+                        y: 24px;
+                        height: parent.height - 24px;
+                        content-width: parent.grid-width;
+                        for row[ri] in DbApi.rows: Rectangle {
+                            height: 22px;
+                            width: parent.width;
+                            background: mod(ri, 2) == 1 ? AppTheme.surface.transparentize(0.6) : transparent;
+                            for cell[ci] in row.cells: Text {
+                                x: ci * results.cell-width + 6px;
+                                width: results.cell-width - 12px;
+                                height: parent.height;
+                                text: cell;
+                                font-family: AppTheme.code-font;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                                color: AppTheme.editor-foreground;
+                                overflow: elide;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component PluginsPanel inherits HorizontalLayout {
+    padding: 6px;
+    spacing: 10px;
+
+    VerticalLayout {
+        horizontal-stretch: 2;
+        spacing: 6px;
+        SectionTitle {
+            text: "INSTALLED PLUGINS";
+        }
+
+        Text {
+            text: "Folder plugins load from " + PluginsApi.plugins-dir;
+            color: AppTheme.foreground-muted;
+            font-size: 11px;
+            overflow: elide;
+        }
+
+        ListView {
+            vertical-stretch: 1;
+            for p[i] in PluginsApi.plugins: Rectangle {
+                height: p.permissions == "" ? 52px : 68px;
+                HorizontalLayout {
+                    padding: 6px;
+                    spacing: 10px;
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: start;
+                            Text {
+                                text: p.name;
+                                font-weight: 700;
+                                color: AppTheme.foreground;
+                            }
+
+                            Text {
+                                text: p.version;
+                                color: AppTheme.foreground-muted;
+                            }
+
+                            Badge {
+                                text: p.status;
+                                tone: p.failed ? AppTheme.error : p.status == "Active" ? AppTheme.success : AppTheme.foreground-muted;
+                            }
+                        }
+
+                        Text {
+                            text: p.description == "" ? p.id : p.id + " · " + p.description;
+                            color: AppTheme.foreground-muted;
+                            font-size: 11px;
+                            overflow: elide;
+                        }
+
+                        if p.permissions != "": Text {
+                            text: p.permissions;
+                            color: p.needs-grant ? AppTheme.warning : AppTheme.foreground-muted;
+                            font-size: 11px;
+                            overflow: elide;
+                        }
+                    }
+
+                    if p.needs-grant: VerticalLayout {
+                        alignment: center;
+                        ApexButton {
+                            text: "Allow";
+                            compact: true;
+                            clicked => {
+                                PluginsApi.grant-permissions(i);
+                            }
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        ApexSwitch {
+                            checked: p.enabled;
+                            toggled(on) => {
+                                PluginsApi.set-enabled(i, on);
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: AppTheme.border;
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        width: 1px;
+        background: AppTheme.border;
+    }
+
+    VerticalLayout {
+        horizontal-stretch: 1;
+        spacing: 6px;
+        SectionTitle {
+            text: "PLUGIN COMMANDS";
+        }
+
+        if PluginsApi.commands.length == 0: Text {
+            text: "No commands from active plugins.";
+            color: AppTheme.foreground-muted;
+        }
+
+        ListView {
+            vertical-stretch: 1;
+            for c[i] in PluginsApi.commands: HorizontalLayout {
+                padding: 4px;
+                spacing: 8px;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    Text {
+                        text: c.title;
+                        color: AppTheme.foreground;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        text: c.keybinding == "" ? c.plugin : c.plugin + " · " + c.keybinding;
+                        font-size: 11px;
+                        color: AppTheme.foreground-muted;
+                        overflow: elide;
+                    }
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    ApexButton {
+                        text: "Run";
+                        compact: true;
+                        clicked => {
+                            PluginsApi.run-command(i);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Find in Files: query box, case toggle, results grouped by file. The
+// search runs on a worker; typing restarts it after a short pause.
+export component FindPanel inherits VerticalLayout {
+    property <int> focus-request: ShellApi.find-focus;
+    changed focus-request => {
+        query.focus();
+    }
+    init => {
+        query.focus();
+    }
+
+    HorizontalLayout {
+        padding: 4px;
+        padding-left: 6px;
+        spacing: 6px;
+        query := ApexLineEdit {
+            height: AppTheme.control-height + 4px;
+            icon: "search";
+            placeholder: "Find in files (Enter to search)";
+            text <=> ShellApi.find-text;
+            edited => {
+                debounce.running = false;
+                debounce.running = true;
+            }
+            accepted(t) => {
+                debounce.running = false;
+                ShellApi.find-run(t, ShellApi.find-case);
+            }
+        }
+
+        // Match case toggle.
+        Rectangle {
+            width: AppTheme.control-height + 4px;
+            height: AppTheme.control-height + 4px;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: ShellApi.find-case ? AppTheme.accent : AppTheme.border;
+            background: ShellApi.find-case ? AppTheme.accent.transparentize(0.82) : case-touch.has-hover ? AppTheme.surface-alt : transparent;
+            animate background, border-color { duration: AppTheme.fast; }
+            Text {
+                text: "Aa";
+                font-size: 11px;
+                font-weight: 600;
+                color: AppTheme.foreground;
+            }
+            case-touch := TouchArea {
+                mouse-cursor: MouseCursor.pointer;
+                clicked => {
+                    ShellApi.find-case = !ShellApi.find-case;
+                    ShellApi.find-run(ShellApi.find-text, ShellApi.find-case);
+                }
+            }
+        }
+
+        if ShellApi.find-busy: VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                background: AppTheme.accent;
+            }
+        }
+
+        Text {
+            text: ShellApi.find-status;
+            vertical-alignment: center;
+            color: AppTheme.foreground-muted;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+    }
+
+    debounce := Timer {
+        interval: 280ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            if ShellApi.find-text.character-count >= 2 {
+                ShellApi.find-run(ShellApi.find-text, ShellApi.find-case);
+            }
+        }
+    }
+
+    Rectangle {
+        height: 1px;
+        background: AppTheme.border;
+    }
+
+    Rectangle {
+        vertical-stretch: 1;
+        background: AppTheme.editor-background;
+        ListView {
+            for r[i] in ShellApi.find-rows: Rectangle {
+                height: AppTheme.row-height;
+                background: row.has-hover ? AppTheme.foreground.transparentize(0.93) : transparent;
+                animate background { duration: AppTheme.fast; }
+                row := TouchArea {
+                    mouse-cursor: MouseCursor.pointer;
+                    clicked => {
+                        ShellApi.find-open(i);
+                    }
+                }
+                if r.kind == 0: HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 6px;
+                    VerticalLayout {
+                        alignment: center;
+                        FileIcon {
+                            kind: r.icon;
+                            size: 14px;
+                        }
+                    }
+                    Text {
+                        text: r.text;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                        color: AppTheme.foreground;
+                    }
+                    Text {
+                        text: r.detail;
+                        vertical-alignment: center;
+                        color: AppTheme.foreground-muted;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Badge {
+                            text: r.count;
+                            tone: AppTheme.accent;
+                        }
+                    }
+                }
+                if r.kind == 1: HorizontalLayout {
+                    padding-left: 30px;
+                    padding-right: 8px;
+                    spacing: 10px;
+                    Text {
+                        width: 36px;
+                        text: r.detail;
+                        horizontal-alignment: right;
+                        vertical-alignment: center;
+                        font-family: AppTheme.code-font;
+                        font-size: 11px;
+                        color: AppTheme.foreground-muted;
+                    }
+                    Text {
+                        text: r.text;
+                        vertical-alignment: center;
+                        font-family: AppTheme.code-font;
+                        font-size: 12px;
+                        color: AppTheme.editor-foreground;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                }
+            }
+        }
+    }
+}

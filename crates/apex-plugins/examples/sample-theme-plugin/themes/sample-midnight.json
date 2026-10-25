@@ -1,0 +1,27 @@
+{
+  "name": "Sample Midnight",
+  "kind": "dark",
+  "colors": {
+    "background": "#0f1729",
+    "foreground": "#d6deeb",
+    "accent": "#7fdbca",
+    "selection": "#1d3b53",
+    "border": "#1e2a44",
+    "panel": "#0b1220",
+    "statusBar": "#0b1220",
+    "error": "#ef5350",
+    "warning": "#ffca28",
+    "info": "#82aaff"
+  },
+  "syntax": {
+    "keyword": "#c792ea",
+    "string": "#ecc48d",
+    "number": "#f78c6c",
+    "comment": "#637777",
+    "function": "#82aaff",
+    "type": "#ffcb8b",
+    "decorator": "#addb67",
+    "variable": "#d6deeb",
+    "operator": "#7fdbca"
+  }
+}

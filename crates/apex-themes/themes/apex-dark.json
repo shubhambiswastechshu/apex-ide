@@ -1,0 +1,44 @@
+{
+  "id": "apex-dark",
+  "name": "Apex Dark",
+  "kind": "dark",
+  "ui": {
+    "background": "#1e1f22",
+    "surface": "#2b2d30",
+    "surface_alt": "#393b40",
+    "border": "#43454a",
+    "foreground": "#dfe1e5",
+    "foreground_muted": "#9a9da3",
+    "accent": "#2e6ae6",
+    "accent_foreground": "#ffffff",
+    "selection": "#214283",
+    "error": "#f75464",
+    "warning": "#e5a54b",
+    "success": "#5fb865",
+    "editor_background": "#1e1f22",
+    "editor_foreground": "#bcbec4",
+    "gutter_foreground": "#6f737a",
+    "line_highlight": "#26282e"
+  },
+  "syntax": {
+    "keyword": "#cf8e6d",
+    "string": "#6aab73",
+    "number": "#2aacb8",
+    "comment": {
+      "color": "#868a91",
+      "italic": true
+    },
+    "function": "#56a8f5",
+    "type": "#c77dbb",
+    "variable": "#bcbec4",
+    "constant": {
+      "color": "#a688bb",
+      "italic": true
+    },
+    "operator": "#bcbec4",
+    "punctuation": "#a1a3ab",
+    "decorator": "#b3ae60",
+    "builtin": "#8888c6",
+    "plain": "#bcbec4"
+  }
+}

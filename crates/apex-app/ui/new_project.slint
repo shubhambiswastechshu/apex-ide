@@ -1,0 +1,526 @@
+// "Create a new project", Visual Studio style: template cards with icons on
+// the left, the project configuration on the right, live progress while the
+// project is created, and Back / Create in a footer.
+
+import { ScrollView, ListView } from "std-widgets.slint";
+import { AppTheme } from "theme.slint";
+import { NewProjectApi } from "api.slint";
+import {
+    ApexButton, IconButton, ApexLineEdit, ApexCheckBox, Chip, RadioRow, Dropdown, Icon, FileIcon,
+} from "widgets.slint";
+
+// The icon tile for a template id.
+component TemplateGlyph inherits Rectangle {
+    in property <string> id;
+    property <bool> is-python: root.id != "django" && root.id != "flask" && root.id != "fastapi"
+        && root.id != "data-science" && root.id != "data-analytics";
+
+    property <color> brand: root.id == "django" ? #0c4b33
+        : root.id == "flask" ? (AppTheme.dark ? #3a3a40 : #2d2d33)
+        : root.id == "fastapi" ? #009485
+        : root.id == "data-science" ? #e8710a
+        : root.id == "data-analytics" ? #7160e8
+        : #3572a5;
+
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
+    background: root.is-python ? root.brand.transparentize(0.85) : root.brand;
+
+    if root.is-python: FileIcon {
+        kind: "python";
+        size: 28px;
+    }
+
+    if root.id == "django": Text {
+        text: "dj";
+        font-size: 20px;
+        font-weight: 800;
+        color: #ffffff;
+    }
+
+    if !root.is-python && root.id != "django": Path {
+        width: 26px;
+        height: 26px;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        stroke: root.id == "fastapi" ? transparent : #ffffff;
+        stroke-width: 1.4px;
+        fill: root.id == "fastapi" ? #ffffff : transparent;
+        commands: root.id == "flask" ? "M 6 1.5 L 10 1.5 M 6.8 1.5 L 6.8 6.5 L 2.8 13.8 L 13.2 13.8 L 9.2 6.5 L 9.2 1.5 M 4.6 10.5 L 11.4 10.5"
+            : root.id == "fastapi" ? "M 9.5 1 L 3.5 9 L 7.6 9 L 6.5 15 L 12.5 7 L 8.4 7 Z"
+            : root.id == "data-science" ? "M 2 1.5 L 2 14 L 14.5 14 M 4.5 11 L 7.5 7 L 10 9.5 L 14 4"
+            : root.id == "data-analytics" ? "M 3 14 L 3 9 M 6.5 14 L 6.5 4.5 M 10 14 L 10 7 M 13.5 14 L 13.5 2"
+            : "";
+    }
+}
+
+component TemplateRow inherits Rectangle {
+    in property <string> id;
+    in property <string> name;
+    in property <string> description;
+    in property <string> packages;
+    in property <bool> selected;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    height: 84px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.selected ? AppTheme.accent : touch.has-hover ? AppTheme.border : transparent;
+    background: root.selected ? AppTheme.accent.transparentize(AppTheme.dark ? 0.8 : 0.9)
+        : touch.has-hover ? AppTheme.foreground.transparentize(0.95) : transparent;
+    animate background, border-color { duration: 90ms; }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: MouseCursor.pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    HorizontalLayout {
+        padding: 14px;
+        spacing: 14px;
+        VerticalLayout {
+            alignment: start;
+            TemplateGlyph {
+                id: root.id;
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 4px;
+            Text {
+                text: root.name;
+                font-size: 14px;
+                font-weight: 600;
+                color: AppTheme.foreground;
+            }
+
+            Text {
+                text: root.description;
+                color: AppTheme.foreground-muted;
+                overflow: elide;
+            }
+
+            HorizontalLayout {
+                alignment: start;
+                spacing: 6px;
+                Rectangle {
+                    height: 20px;
+                    width: tag-py.preferred-width + 14px;
+                    border-radius: 3px;
+                    background: AppTheme.surface-alt;
+                    tag-py := Text {
+                        text: "Python";
+                        font-size: 11px;
+                        color: AppTheme.foreground;
+                    }
+                }
+                if root.packages != "": Rectangle {
+                    height: 20px;
+                    width: min(tag.preferred-width + 14px, 320px);
+                    border-radius: 3px;
+                    background: AppTheme.surface-alt;
+                    tag := Text {
+                        width: parent.width - 14px;
+                        text: root.packages;
+                        font-size: 11px;
+                        overflow: elide;
+                        color: AppTheme.foreground;
+                    }
+                }
+            }
+        }
+
+        if root.selected: VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 20px;
+                height: 20px;
+                border-radius: 10px;
+                background: AppTheme.accent;
+                Icon {
+                    kind: "check";
+                    size: 14px;
+                    color: AppTheme.accent-foreground;
+                }
+            }
+        }
+    }
+}
+
+component StepView inherits HorizontalLayout {
+    in property <string> label;
+    in property <int> state;
+    in property <string> note;
+
+    spacing: 10px;
+    height: 24px;
+    VerticalLayout {
+        alignment: center;
+        Rectangle {
+            width: 18px;
+            height: 18px;
+            border-radius: 9px;
+            border-width: root.state == 0 || root.state == 3 ? 1px : 0px;
+            border-color: AppTheme.foreground-muted;
+            background: root.state == 1 ? AppTheme.accent : root.state == 2 ? AppTheme.success : root.state == 4 ? AppTheme.error : transparent;
+            if root.state == 2 || root.state == 4: Icon {
+                kind: root.state == 2 ? "check" : "close";
+                size: 12px;
+                color: AppTheme.dark ? #000000 : #ffffff;
+            }
+            if root.state == 1: Rectangle {
+                width: 6px;
+                height: 6px;
+                border-radius: 3px;
+                background: AppTheme.accent-foreground;
+            }
+            if root.state == 3: Rectangle {
+                width: 8px;
+                height: 1.5px;
+                background: AppTheme.foreground-muted;
+            }
+        }
+    }
+
+    Text {
+        vertical-alignment: center;
+        text: root.label;
+        color: root.state == 0 || root.state == 3 ? AppTheme.foreground-muted : AppTheme.foreground;
+        font-weight: root.state == 1 ? 600 : 400;
+    }
+
+    Text {
+        vertical-alignment: center;
+        text: root.note;
+        color: AppTheme.foreground-muted;
+        overflow: elide;
+        horizontal-stretch: 1;
+    }
+}
+
+component FieldLabel inherits Text {
+    color: AppTheme.foreground;
+    font-weight: 600;
+}
+
+export component NewProjectScreen inherits Rectangle {
+    background: AppTheme.dark ? AppTheme.background : AppTheme.surface;
+
+    property <bool> show-progress: NewProjectApi.busy || NewProjectApi.steps.length > 0;
+
+    VerticalLayout {
+        // Header.
+        HorizontalLayout {
+            padding-left: 40px;
+            padding-right: 40px;
+            padding-top: 28px;
+            padding-bottom: 18px;
+            spacing: 10px;
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    icon: "arrow-left";
+                    tooltip: "Back";
+                    enabled: !NewProjectApi.busy;
+                    clicked => {
+                        NewProjectApi.cancel();
+                    }
+                }
+            }
+            Text {
+                text: "Create a new project";
+                font-size: 26px;
+                font-weight: 300;
+                vertical-alignment: center;
+                color: AppTheme.foreground;
+            }
+        }
+
+        HorizontalLayout {
+            vertical-stretch: 1;
+            padding-left: 40px;
+            padding-right: 40px;
+            spacing: 36px;
+
+            // Templates.
+            VerticalLayout {
+                horizontal-stretch: 1;
+                min-width: 340px;
+                spacing: 10px;
+                Text {
+                    text: "Project templates";
+                    font-size: 16px;
+                    color: AppTheme.foreground;
+                }
+
+                ScrollView {
+                    vertical-stretch: 1;
+                    content-height: NewProjectApi.templates.length * 90px;
+                    for t[i] in NewProjectApi.templates: TemplateRow {
+                        y: i * 90px;
+                        width: parent.width;
+                        id: t.id;
+                        name: t.name;
+                        description: t.description;
+                        packages: t.packages;
+                        selected: i == NewProjectApi.template-index;
+                        enabled: !NewProjectApi.busy;
+                        clicked => {
+                            NewProjectApi.template-index = i;
+                            NewProjectApi.changed();
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                width: 1px;
+                background: AppTheme.border;
+            }
+
+            // Configuration and progress.
+            VerticalLayout {
+                horizontal-stretch: 1;
+                min-width: 360px;
+                max-width: 560px;
+                spacing: 8px;
+
+                Text {
+                    text: "Configure your new project";
+                    font-size: 16px;
+                    color: AppTheme.foreground;
+                }
+
+                Text {
+                    text: NewProjectApi.templates.length > 0 ? NewProjectApi.templates[NewProjectApi.template-index].name : "";
+                    color: AppTheme.foreground-muted;
+                }
+
+                Rectangle {
+                    height: 6px;
+                }
+
+                FieldLabel {
+                    text: "Project name";
+                }
+
+                ApexLineEdit {
+                    text <=> NewProjectApi.name;
+                    enabled: !NewProjectApi.busy;
+                    edited => {
+                        NewProjectApi.changed();
+                    }
+                }
+
+                Rectangle {
+                    height: 4px;
+                }
+
+                FieldLabel {
+                    text: "Location";
+                }
+
+                ApexLineEdit {
+                    text <=> NewProjectApi.location;
+                    enabled: !NewProjectApi.busy;
+                    icon: "folder";
+                    mono: true;
+                    edited => {
+                        NewProjectApi.changed();
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    if NewProjectApi.validation != "": VerticalLayout {
+                        alignment: center;
+                        Icon {
+                            kind: "error";
+                            size: 13px;
+                            color: AppTheme.error;
+                        }
+                    }
+                    Text {
+                        text: NewProjectApi.validation != "" ? NewProjectApi.validation : "Project will be created in \"" + NewProjectApi.target-path + "\"";
+                        color: NewProjectApi.validation != "" ? AppTheme.error : AppTheme.foreground-muted;
+                        font-size: 12px;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                }
+
+                Rectangle {
+                    height: 10px;
+                }
+
+                FieldLabel {
+                    text: "Python environment (.venv)";
+                }
+
+                RadioRow {
+                    text: "New uv environment with Python";
+                    selected: NewProjectApi.env-mode == 0;
+                    clicked => {
+                        NewProjectApi.env-mode = 0;
+                        NewProjectApi.changed();
+                    }
+                }
+
+                HorizontalLayout {
+                    padding-left: 26px;
+                    spacing: 6px;
+                    alignment: start;
+                    for v[i] in NewProjectApi.python-versions: Chip {
+                        text: v;
+                        selected: NewProjectApi.env-mode == 0 && i == NewProjectApi.version-index;
+                        enabled: !NewProjectApi.busy;
+                        clicked => {
+                            NewProjectApi.env-mode = 0;
+                            NewProjectApi.version-index = i;
+                            NewProjectApi.changed();
+                        }
+                    }
+                }
+
+                Rectangle {
+                    height: 2px;
+                }
+
+                RadioRow {
+                    text: "Based on an installed interpreter";
+                    selected: NewProjectApi.env-mode == 1;
+                    clicked => {
+                        NewProjectApi.env-mode = 1;
+                        NewProjectApi.changed();
+                    }
+                }
+
+                HorizontalLayout {
+                    padding-left: 26px;
+                    Dropdown {
+                        height: 30px;
+                        horizontal-stretch: 1;
+                        model: NewProjectApi.interpreter-labels;
+                        current-index: NewProjectApi.interpreter-index;
+                        enabled: !NewProjectApi.busy && !NewProjectApi.discovering;
+                        placeholder: NewProjectApi.discovering ? "Searching for interpreters..." : "No interpreters found";
+                        selected(i) => {
+                            NewProjectApi.env-mode = 1;
+                            NewProjectApi.interpreter-index = i;
+                            NewProjectApi.changed();
+                        }
+                    }
+                }
+
+                if NewProjectApi.uv-status != "": Text {
+                    text: NewProjectApi.uv-status;
+                    color: AppTheme.foreground-muted;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+
+                Rectangle {
+                    height: 4px;
+                }
+
+                ApexCheckBox {
+                    text: NewProjectApi.templates.length > 0 && NewProjectApi.templates[NewProjectApi.template-index].packages != ""
+                        ? "Install template packages: " + NewProjectApi.templates[NewProjectApi.template-index].packages
+                        : "Install template packages (this template has none)";
+                    checked <=> NewProjectApi.install-packages;
+                    enabled: !NewProjectApi.busy;
+                }
+
+                if root.show-progress: Rectangle {
+                    vertical-stretch: 1;
+                    min-height: 150px;
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: NewProjectApi.failed ? AppTheme.error : AppTheme.border;
+                    background: AppTheme.dark ? AppTheme.surface : AppTheme.editor-background;
+
+                    VerticalLayout {
+                        padding: 12px;
+                        spacing: 2px;
+                        for s in NewProjectApi.steps: StepView {
+                            label: s.label;
+                            state: s.state;
+                            note: s.note;
+                        }
+
+                        Rectangle {
+                            height: 6px;
+                        }
+
+                        Rectangle {
+                            vertical-stretch: 1;
+                            border-radius: 4px;
+                            background: AppTheme.editor-background;
+                            log := ListView {
+                                property <int> count: NewProjectApi.log.length;
+                                changed count => {
+                                    self.content-y = min(0px, self.visible-height - self.count * 18px);
+                                }
+                                for line in NewProjectApi.log: Text {
+                                    x: 6px;
+                                    height: 18px;
+                                    text: line;
+                                    font-family: AppTheme.code-font;
+                                    font-size: 12px;
+                                    color: AppTheme.foreground-muted;
+                                    overflow: elide;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if !root.show-progress: Rectangle {
+                    vertical-stretch: 1;
+                }
+            }
+        }
+
+        // Footer.
+        Rectangle {
+            height: 64px;
+            Rectangle {
+                y: 0px;
+                height: 1px;
+                background: AppTheme.border;
+            }
+            HorizontalLayout {
+                padding-left: 40px;
+                padding-right: 40px;
+                padding-top: 16px;
+                padding-bottom: 16px;
+                spacing: 10px;
+                alignment: end;
+                ApexButton {
+                    // While busy this stops the running step.
+                    text: NewProjectApi.busy ? "Cancel" : "Back";
+                    width: 110px;
+                    clicked => {
+                        NewProjectApi.cancel();
+                    }
+                }
+
+                ApexButton {
+                    text: NewProjectApi.busy ? "Creating..." : NewProjectApi.failed ? "Retry" : "Create";
+                    kind: 1;
+                    width: 110px;
+                    enabled: !NewProjectApi.busy && NewProjectApi.validation == "";
+                    clicked => {
+                        NewProjectApi.create();
+                    }
+                }
+            }
+        }
+    }
+}

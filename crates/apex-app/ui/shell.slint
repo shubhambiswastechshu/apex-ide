@@ -1,0 +1,825 @@
+// Window-level overlays driven by ShellApi: the command palette (also Go to
+// File, Go to Line and Search Everywhere), Keyboard Shortcuts, Settings and
+// Open Folder. All fade/scale in briefly.
+
+import { ListView } from "std-widgets.slint";
+import { AppTheme } from "theme.slint";
+import { AppApi, WelcomeApi } from "api.slint";
+import { ShellApi } from "shell_api.slint";
+import {
+    ApexButton, IconButton, ApexLineEdit, Dropdown, Icon, FileIcon, ApexSwitch, RadioRow,
+} from "widgets.slint";
+
+// A centered floating card that animates in and dims the window behind.
+component Overlay inherits Rectangle {
+    in property <length> card-width: 600px;
+    in property <length> card-top: 64px;
+    in property <length> card-height: 400px;
+    callback dismissed();
+    property <bool> shown: false;
+    init => {
+        self.shown = true;
+    }
+
+    background: root.shown ? #00000038 : #00000000;
+    animate background { duration: AppTheme.normal; easing: ease-out; }
+
+    TouchArea {
+        clicked => {
+            root.dismissed();
+        }
+    }
+
+    card := Rectangle {
+        x: (root.width - self.width) / 2;
+        y: root.card-top + (root.shown ? 0px : -8px);
+        width: min(root.card-width, root.width - 32px);
+        height: min(root.card-height, root.height - root.card-top - 24px);
+        opacity: root.shown ? 1 : 0;
+        animate y, opacity { duration: AppTheme.normal; easing: ease-out; }
+        border-radius: 8px;
+        background: AppTheme.popup-background;
+        border-width: 1px;
+        border-color: AppTheme.popup-border;
+        drop-shadow-blur: 32px;
+        drop-shadow-offset-y: 10px;
+        drop-shadow-color: AppTheme.popup-shadow;
+        clip: true;
+
+        // Swallow clicks inside the card.
+        TouchArea { }
+
+        @children
+    }
+}
+
+// A key-cap style shortcut label.
+component KeyCaps inherits Rectangle {
+    in property <string> text;
+    visible: root.text != "";
+    width: label.preferred-width + 10px;
+    height: 18px;
+    border-radius: 3px;
+    border-width: 1px;
+    border-color: AppTheme.popup-border;
+    background: AppTheme.surface-alt.transparentize(0.3);
+    label := Text {
+        text: root.text;
+        font-size: 11px;
+        color: AppTheme.foreground-muted;
+    }
+}
+
+component ModeTab inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    callback clicked();
+
+    width: label.preferred-width;
+    height: 22px;
+    label := Text {
+        y: 0px;
+        text: root.text;
+        font-weight: root.active ? 600 : 400;
+        color: root.active ? AppTheme.foreground : AppTheme.foreground-muted;
+    }
+    Rectangle {
+        y: parent.height - 2px;
+        height: 2px;
+        x: (parent.width - self.width) / 2;
+        width: root.active ? parent.width : 0px;
+        background: AppTheme.accent;
+        animate width { duration: AppTheme.normal; easing: ease-out; }
+    }
+    TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+
+export component PaletteOverlay inherits Overlay {
+    property <length> row-h: 30px;
+    property <int> serial: ShellApi.palette-serial;
+    changed serial => {
+        input.focus();
+    }
+
+    card-width: 640px;
+    card-height: 470px;
+    dismissed => {
+        root.close();
+    }
+
+    function close() {
+        ShellApi.palette-open = false;
+        ShellApi.palette-closed();
+        ShellApi.refocus += 1;
+    }
+
+    function ensure-visible() {
+        if ShellApi.palette-index * root.row-h + list.content-y < 0px {
+            list.content-y = -ShellApi.palette-index * root.row-h;
+        } else if (ShellApi.palette-index + 1) * root.row-h + list.content-y > list.visible-height {
+            list.content-y = list.visible-height - (ShellApi.palette-index + 1) * root.row-h;
+        }
+    }
+
+    function step(delta: int) {
+        if ShellApi.palette-items.length == 0 {
+            return;
+        }
+        ShellApi.palette-index = mod(ShellApi.palette-index + delta + ShellApi.palette-items.length, ShellApi.palette-items.length);
+        // Skip category headers.
+        if ShellApi.palette-items[ShellApi.palette-index].header {
+            ShellApi.palette-index = mod(ShellApi.palette-index + delta + ShellApi.palette-items.length, ShellApi.palette-items.length);
+        }
+        root.ensure-visible();
+    }
+
+    VerticalLayout {
+        // Mode header.
+        HorizontalLayout {
+            padding-left: 14px;
+            padding-right: 10px;
+            padding-top: 10px;
+            spacing: 14px;
+            ModeTab {
+                text: "All";
+                active: ShellApi.palette-mode == 3;
+                clicked => {
+                    ShellApi.invoke("nav.search_everywhere");
+                }
+            }
+            ModeTab {
+                text: "Files";
+                active: ShellApi.palette-mode == 1;
+                clicked => {
+                    ShellApi.invoke("nav.goto_file");
+                }
+            }
+            ModeTab {
+                text: "Actions";
+                active: ShellApi.palette-mode == 0;
+                clicked => {
+                    ShellApi.invoke("view.command_palette");
+                }
+            }
+            ModeTab {
+                text: "Line";
+                active: ShellApi.palette-mode == 2;
+                clicked => {
+                    ShellApi.invoke("nav.goto_line");
+                }
+            }
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+            Text {
+                text: "Double Shift · Ctrl+Shift+P";
+                font-size: 11px;
+                vertical-alignment: center;
+                color: AppTheme.foreground-muted;
+            }
+        }
+
+        // Query.
+        Rectangle {
+            height: 44px;
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 10px;
+                VerticalLayout {
+                    alignment: center;
+                    Icon {
+                        kind: ShellApi.palette-mode == 2 ? "arrow-right" : "search";
+                        size: 16px;
+                        color: AppTheme.accent;
+                    }
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                    clip: true;
+                    Text {
+                        width: 100%;
+                        height: 100%;
+                        vertical-alignment: center;
+                        font-size: 15px;
+                        color: AppTheme.foreground-muted;
+                        text: input.text != "" ? ""
+                            : ShellApi.palette-mode == 1 ? "Type a file name (fuzzy: \"mvp\" finds models/views.py)"
+                            : ShellApi.palette-mode == 2 ? "Line number, or line:column"
+                            : ShellApi.palette-mode == 3 ? "Search files and actions"
+                            : "Type a command";
+                    }
+                    input := TextInput {
+                        width: 100%;
+                        height: 100%;
+                        vertical-alignment: center;
+                        single-line: true;
+                        font-size: 15px;
+                        color: AppTheme.foreground;
+                        selection-background-color: AppTheme.selection;
+                        text <=> ShellApi.palette-text;
+                        init => {
+                            self.focus();
+                        }
+                        edited => {
+                            ShellApi.palette-edited(self.text);
+                            list.content-y = 0px;
+                        }
+                        key-pressed(e) => {
+                            if e.text == Key.Escape {
+                                root.close();
+                                return accept;
+                            }
+                            if e.text == Key.DownArrow {
+                                root.step(1);
+                                return accept;
+                            }
+                            if e.text == Key.UpArrow {
+                                root.step(-1);
+                                return accept;
+                            }
+                            if e.text == Key.PageDown {
+                                root.step(8);
+                                return accept;
+                            }
+                            if e.text == Key.PageUp {
+                                root.step(-8);
+                                return accept;
+                            }
+                            if e.text == Key.Return {
+                                ShellApi.palette-accept(ShellApi.palette-index);
+                                return accept;
+                            }
+                            reject
+                        }
+                    }
+                }
+            }
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                background: AppTheme.popup-border;
+            }
+        }
+
+        // Results.
+        list := ListView {
+            vertical-stretch: 1;
+            for item[i] in ShellApi.palette-items: Rectangle {
+                height: root.row-h;
+                property <bool> current: i == ShellApi.palette-index && !item.header;
+                background: self.current ? AppTheme.popup-selection : row.has-hover && !item.header ? AppTheme.foreground.transparentize(0.95) : transparent;
+                animate background { duration: 90ms; }
+
+                if self.current: Rectangle {
+                    x: 0px;
+                    y: 5px;
+                    width: 3px;
+                    height: parent.height - 10px;
+                    border-radius: 1.5px;
+                    background: AppTheme.accent;
+                }
+
+                row := TouchArea {
+                    enabled: !item.header;
+                    clicked => {
+                        ShellApi.palette-index = i;
+                        ShellApi.palette-accept(i);
+                    }
+                }
+
+                if item.header: HorizontalLayout {
+                    padding-left: 14px;
+                    padding-top: 8px;
+                    Text {
+                        text: item.title[0].text;
+                        font-size: 11px;
+                        font-weight: 600;
+                        color: AppTheme.foreground-muted;
+                        vertical-alignment: center;
+                    }
+                }
+
+                if !item.header: HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    spacing: 8px;
+                    VerticalLayout {
+                        alignment: center;
+                        width: 16px;
+                        if item.icon == "command": Icon {
+                            kind: "command";
+                            size: 14px;
+                        }
+                        if item.icon != "command": FileIcon {
+                            kind: item.icon;
+                            size: 15px;
+                        }
+                    }
+                    // Name with matched characters highlighted.
+                    HorizontalLayout {
+                        spacing: 0px;
+                        for seg in item.title: Text {
+                            text: seg.text;
+                            vertical-alignment: center;
+                            color: seg.hit ? AppTheme.accent : AppTheme.foreground;
+                            font-weight: seg.hit ? 700 : 400;
+                        }
+                    }
+                    Text {
+                        text: item.detail;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                        font-size: AppTheme.ui-font-size - 1px;
+                        color: AppTheme.foreground-muted;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        KeyCaps {
+                            text: item.shortcut;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Footer.
+        Rectangle {
+            height: 26px;
+            background: AppTheme.surface-alt.transparentize(0.5);
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 14px;
+                Text {
+                    text: ShellApi.palette-status;
+                    vertical-alignment: center;
+                    font-size: 11px;
+                    color: AppTheme.foreground-muted;
+                    horizontal-stretch: 1;
+                }
+                Text {
+                    text: "↑↓ select   Enter open   Esc close";
+                    vertical-alignment: center;
+                    font-size: 11px;
+                    color: AppTheme.foreground-muted;
+                }
+            }
+        }
+    }
+}
+
+export component ShortcutsDialog inherits Overlay {
+    card-width: 620px;
+    card-height: 560px;
+    dismissed => {
+        ShellApi.shortcuts-open = false;
+    }
+
+    VerticalLayout {
+        HorizontalLayout {
+            padding: 14px;
+            padding-bottom: 8px;
+            Text {
+                text: "Keyboard Shortcuts";
+                font-size: 17px;
+                font-weight: 600;
+                color: AppTheme.foreground;
+                horizontal-stretch: 1;
+            }
+            FocusScope {
+                width: 0px;
+                init => {
+                    self.focus();
+                }
+                key-pressed(e) => {
+                    if e.text == Key.Escape {
+                        ShellApi.shortcuts-open = false;
+                        ShellApi.refocus += 1;
+                        return accept;
+                    }
+                    reject
+                }
+            }
+            IconButton {
+                icon: "close";
+                clicked => {
+                    ShellApi.shortcuts-open = false;
+                }
+            }
+        }
+
+        ListView {
+            vertical-stretch: 1;
+            for r in ShellApi.shortcuts: Rectangle {
+                height: r.header ? 30px : 24px;
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    spacing: 10px;
+                    Text {
+                        text: r.title;
+                        vertical-alignment: r.header ? bottom : center;
+                        font-weight: r.header ? 600 : 400;
+                        font-size: r.header ? 11px : AppTheme.ui-font-size;
+                        color: r.header ? AppTheme.accent : AppTheme.foreground;
+                        horizontal-stretch: 1;
+                    }
+                    if r.conflict: VerticalLayout {
+                        alignment: center;
+                        Icon {
+                            kind: "warning";
+                            size: 13px;
+                            color: AppTheme.warning;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        KeyCaps {
+                            text: r.keys;
+                        }
+                    }
+                }
+                if !r.header: Rectangle {
+                    x: 16px;
+                    width: parent.width - 32px;
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: AppTheme.popup-border.transparentize(0.5);
+                }
+            }
+        }
+
+        Rectangle {
+            height: 46px;
+            background: AppTheme.surface-alt.transparentize(0.5);
+            HorizontalLayout {
+                padding: 8px;
+                padding-left: 16px;
+                spacing: 8px;
+                Text {
+                    text: "Customize in " + ShellApi.keymap-path;
+                    font-size: 11px;
+                    color: AppTheme.foreground-muted;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+                ApexButton {
+                    text: "Edit keymap.toml";
+                    compact: true;
+                    clicked => {
+                        ShellApi.shortcuts-open = false;
+                        ShellApi.invoke("file.edit_keymap");
+                    }
+                }
+                ApexButton {
+                    text: "Reload";
+                    compact: true;
+                    clicked => {
+                        ShellApi.invoke("file.reload_keymap");
+                        ShellApi.invoke("help.shortcuts");
+                    }
+                }
+            }
+        }
+    }
+}
+
+component SettingRow inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> hint;
+    spacing: 12px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+    VerticalLayout {
+        alignment: center;
+        horizontal-stretch: 1;
+        Text {
+            text: root.label;
+            color: AppTheme.foreground;
+        }
+        if root.hint != "": Text {
+            text: root.hint;
+            font-size: 11px;
+            color: AppTheme.foreground-muted;
+        }
+    }
+    @children
+}
+
+export component SettingsDialog inherits Overlay {
+    card-width: 520px;
+    card-height: 470px;
+    card-top: 80px;
+    dismissed => {
+        ShellApi.settings-open = false;
+    }
+
+    VerticalLayout {
+        padding: 18px;
+        spacing: 6px;
+        HorizontalLayout {
+            Text {
+                text: "Settings";
+                font-size: 17px;
+                font-weight: 600;
+                color: AppTheme.foreground;
+                horizontal-stretch: 1;
+            }
+            FocusScope {
+                width: 0px;
+                init => {
+                    self.focus();
+                }
+                key-pressed(e) => {
+                    if e.text == Key.Escape {
+                        ShellApi.settings-open = false;
+                        ShellApi.refocus += 1;
+                        return accept;
+                    }
+                    reject
+                }
+            }
+            IconButton {
+                icon: "close";
+                clicked => {
+                    ShellApi.settings-open = false;
+                }
+            }
+        }
+
+        Text {
+            text: "APPEARANCE";
+            font-size: 11px;
+            font-weight: 600;
+            color: AppTheme.accent;
+        }
+
+        SettingRow {
+            label: "Theme";
+            VerticalLayout {
+                alignment: center;
+                Dropdown {
+                    width: 200px;
+                    model: AppApi.theme-names;
+                    current-index: AppApi.theme-index;
+                    selected(i) => {
+                        AppApi.select-theme(i);
+                    }
+                }
+            }
+        }
+
+        SettingRow {
+            label: "Density";
+            hint: "Compact fits more code and tree rows on screen";
+            VerticalLayout {
+                alignment: center;
+                spacing: 4px;
+                RadioRow {
+                    text: "Compact";
+                    selected: AppTheme.compact;
+                    clicked => {
+                        ShellApi.set-compact(true);
+                    }
+                }
+                RadioRow {
+                    text: "Comfortable";
+                    selected: !AppTheme.compact;
+                    clicked => {
+                        ShellApi.set-compact(false);
+                    }
+                }
+            }
+        }
+
+        SettingRow {
+            label: "Toolbar";
+            VerticalLayout {
+                alignment: center;
+                ApexSwitch {
+                    checked: ShellApi.toolbar-visible;
+                    toggled => {
+                        ShellApi.invoke("view.toolbar");
+                    }
+                }
+            }
+        }
+
+        SettingRow {
+            label: "Status bar";
+            VerticalLayout {
+                alignment: center;
+                ApexSwitch {
+                    checked: ShellApi.status-visible;
+                    toggled => {
+                        ShellApi.invoke("view.status_bar");
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            height: 8px;
+        }
+
+        Text {
+            text: "KEYMAP";
+            font-size: 11px;
+            font-weight: 600;
+            color: AppTheme.accent;
+        }
+
+        SettingRow {
+            label: "Shortcuts";
+            hint: ShellApi.keymap-path;
+            ApexButton {
+                text: "View";
+                compact: true;
+                clicked => {
+                    ShellApi.settings-open = false;
+                    ShellApi.invoke("help.shortcuts");
+                }
+            }
+            ApexButton {
+                text: "Edit";
+                compact: true;
+                clicked => {
+                    ShellApi.settings-open = false;
+                    ShellApi.invoke("file.edit_keymap");
+                }
+            }
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+        }
+
+        HorizontalLayout {
+            alignment: end;
+            ApexButton {
+                text: "Done";
+                kind: 1;
+                width: 90px;
+                clicked => {
+                    ShellApi.settings-open = false;
+                }
+            }
+        }
+    }
+}
+
+export component OpenFolderDialog inherits Overlay {
+    card-width: 560px;
+    card-height: 150px;
+    card-top: 90px;
+    dismissed => {
+        ShellApi.open-folder-open = false;
+    }
+
+    VerticalLayout {
+        padding: 18px;
+        spacing: 10px;
+        Text {
+            text: "Open Folder";
+            font-size: 17px;
+            font-weight: 600;
+            color: AppTheme.foreground;
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            path := ApexLineEdit {
+                icon: "folder";
+                mono: true;
+                placeholder: "Absolute path of a project folder";
+                text <=> ShellApi.open-folder-path;
+                init => {
+                    self.focus();
+                }
+                accepted(p) => {
+                    ShellApi.open-folder-open = false;
+                    WelcomeApi.open-folder(p);
+                }
+            }
+            ApexButton {
+                text: "Open";
+                kind: 1;
+                enabled: ShellApi.open-folder-path != "";
+                clicked => {
+                    ShellApi.open-folder-open = false;
+                    WelcomeApi.open-folder(ShellApi.open-folder-path);
+                }
+            }
+            ApexButton {
+                text: "Cancel";
+                clicked => {
+                    ShellApi.open-folder-open = false;
+                }
+            }
+        }
+    }
+}
+
+// Ctrl+Tab: the open files, most recently used first. Rust moves the
+// selection (Tab / Shift+Tab / arrows with Ctrl held) and switches when Ctrl
+// is released; a click switches straight away.
+export component TabSwitcher inherits Overlay {
+    property <length> row-h: 28px;
+    property <int> index: ShellApi.switcher-index;
+    card-width: 480px;
+    card-top: 90px;
+    card-height: min(ShellApi.switcher-items.length, 14) * root.row-h + 46px;
+    dismissed => {
+        ShellApi.switcher-open = false;
+        ShellApi.refocus += 1;
+    }
+    changed index => {
+        if root.index * root.row-h + list.content-y < 0px {
+            list.content-y = -root.index * root.row-h;
+        } else if (root.index + 1) * root.row-h + list.content-y > list.visible-height {
+            list.content-y = list.visible-height - (root.index + 1) * root.row-h;
+        }
+    }
+
+    VerticalLayout {
+        Rectangle {
+            height: 36px;
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                Text {
+                    text: "Open Files";
+                    font-weight: 600;
+                    color: AppTheme.foreground;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                Text {
+                    text: "Ctrl+Tab · release Ctrl to switch · Esc cancel";
+                    font-size: 11px;
+                    color: AppTheme.foreground-muted;
+                    vertical-alignment: center;
+                }
+            }
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                background: AppTheme.popup-border;
+            }
+        }
+        list := ListView {
+            vertical-stretch: 1;
+            for item[i] in ShellApi.switcher-items: Rectangle {
+                height: root.row-h;
+                background: i == ShellApi.switcher-index ? AppTheme.popup-selection : row.has-hover ? AppTheme.foreground.transparentize(0.95) : transparent;
+                if i == ShellApi.switcher-index: Rectangle {
+                    x: 0px;
+                    y: 5px;
+                    width: 3px;
+                    height: parent.height - 10px;
+                    border-radius: 1.5px;
+                    background: AppTheme.accent;
+                }
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    spacing: 8px;
+                    VerticalLayout {
+                        alignment: center;
+                        FileIcon {
+                            kind: item.icon;
+                            size: 15px;
+                        }
+                    }
+                    Text {
+                        text: item.title + (item.dirty ? " ●" : "");
+                        vertical-alignment: center;
+                        font-weight: i == ShellApi.switcher-index ? 600 : 400;
+                        color: AppTheme.foreground;
+                    }
+                    Text {
+                        text: item.detail;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                        font-size: AppTheme.ui-font-size - 1px;
+                        color: AppTheme.foreground-muted;
+                    }
+                }
+                row := TouchArea {
+                    clicked => {
+                        ShellApi.switcher-pick(i);
+                    }
+                }
+            }
+        }
+    }
+}

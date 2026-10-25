@@ -1,0 +1,51 @@
+{
+  "id": "apex-vs-blue",
+  "name": "Apex VS Blue",
+  "kind": "light",
+  "ui": {
+    "background": "#ccd5f0",
+    "surface": "#f7f9fe",
+    "surface_alt": "#e6e7ef",
+    "border": "#ccd2e3",
+    "foreground": "#1e1e1e",
+    "foreground_muted": "#545b70",
+    "accent": "#3d59a8",
+    "accent_foreground": "#ffffff",
+    "selection": "#add6ff",
+    "error": "#c42b1c",
+    "warning": "#8a5a00",
+    "success": "#0f7b0f",
+    "editor_background": "#ffffff",
+    "editor_foreground": "#1e1e1e",
+    "gutter_foreground": "#2b91af",
+    "line_highlight": "#f3f4f9",
+    "chrome": {
+      "title_bar": "#ccd5f0",
+      "title_bar_foreground": "#1e1e1e",
+      "frame": "#5d6b99",
+      "frame_foreground": "#ffffff",
+      "tab_active": "#f5cc84",
+      "tab_active_foreground": "#1e1e1e",
+      "status_bar": "#40508d",
+      "status_bar_foreground": "#ffffff"
+    }
+  },
+  "syntax": {
+    "keyword": "#0000ff",
+    "string": "#a31515",
+    "number": "#098658",
+    "comment": {
+      "color": "#008000",
+      "italic": true
+    },
+    "function": "#74531f",
+    "type": "#267f99",
+    "variable": "#1f377f",
+    "constant": "#0070c1",
+    "operator": "#1e1e1e",
+    "punctuation": "#3b3b3b",
+    "decorator": "#af00db",
+    "builtin": "#2b6cb0",
+    "plain": "#1e1e1e"
+  }
+}

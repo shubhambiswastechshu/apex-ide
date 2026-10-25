@@ -1,0 +1,44 @@
+{
+  "id": "apex-light",
+  "name": "Apex Light",
+  "kind": "light",
+  "ui": {
+    "background": "#f7f8fa",
+    "surface": "#ffffff",
+    "surface_alt": "#ebecf0",
+    "border": "#d3d5db",
+    "foreground": "#1e1f22",
+    "foreground_muted": "#6c707e",
+    "accent": "#2f62d6",
+    "accent_foreground": "#ffffff",
+    "selection": "#a6d2ff",
+    "error": "#c7222d",
+    "warning": "#9a5b00",
+    "success": "#1f7a35",
+    "editor_background": "#ffffff",
+    "editor_foreground": "#080808",
+    "gutter_foreground": "#767a85",
+    "line_highlight": "#f5f8fe"
+  },
+  "syntax": {
+    "keyword": "#0033b3",
+    "string": "#067d17",
+    "number": "#1750eb",
+    "comment": {
+      "color": "#707070",
+      "italic": true
+    },
+    "function": "#00627a",
+    "type": "#9c5500",
+    "variable": "#080808",
+    "constant": {
+      "color": "#871094",
+      "italic": true
+    },
+    "operator": "#080808",
+    "punctuation": "#3d3d3d",
+    "decorator": "#857300",
+    "builtin": "#000080",
+    "plain": "#080808"
+  }
+}

@@ -1,0 +1,325 @@
+// The start window, laid out like Visual Studio's "Get started" screen:
+// recent projects on the left, large action cards on the right.
+
+import { ScrollView } from "std-widgets.slint";
+import { AppTheme } from "theme.slint";
+import { AppApi, WelcomeApi } from "api.slint";
+import { ApexButton, IconButton, ApexLineEdit, Dropdown, Icon, AppLogo, FileIcon } from "widgets.slint";
+
+// A big clickable action card with an icon tile, title and description.
+component ActionCard inherits Rectangle {
+    in property <string> title;
+    in property <string> description;
+    in property <string> icon;
+    in property <bool> expanded: false;
+    callback clicked();
+
+    height: body.preferred-height;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: touch.has-hover || root.expanded ? AppTheme.accent : AppTheme.border;
+    background: touch.pressed ? AppTheme.surface-alt : touch.has-hover ? AppTheme.accent.transparentize(0.93) : (AppTheme.dark ? AppTheme.surface : AppTheme.editor-background);
+    animate background, border-color { duration: 100ms; }
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    body := VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 16px;
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 40px;
+                    height: 40px;
+                    border-radius: 6px;
+                    background: AppTheme.accent.transparentize(0.86);
+                    Icon {
+                        kind: root.icon;
+                        size: 24px;
+                        color: AppTheme.accent;
+                    }
+                }
+            }
+
+            VerticalLayout {
+                alignment: center;
+                spacing: 3px;
+                Text {
+                    text: root.title;
+                    font-size: 15px;
+                    font-weight: 600;
+                    color: AppTheme.foreground;
+                }
+
+                Text {
+                    text: root.description;
+                    wrap: word-wrap;
+                    color: AppTheme.foreground-muted;
+                }
+            }
+        }
+
+        @children
+    }
+}
+
+export component WelcomeScreen inherits Rectangle {
+    property <bool> open-expanded: false;
+
+    background: AppTheme.dark ? AppTheme.background : AppTheme.surface;
+
+    HorizontalLayout {
+    alignment: center;
+    VerticalLayout {
+        width: min(root.width, 1180px);
+        padding-left: 56px;
+        padding-right: 56px;
+        padding-top: 48px;
+        padding-bottom: 28px;
+        spacing: 28px;
+
+        // Header.
+        HorizontalLayout {
+            spacing: 14px;
+            AppLogo {
+                size: 40px;
+            }
+
+            VerticalLayout {
+                alignment: center;
+                spacing: 2px;
+                Text {
+                    text: "Apex IDE";
+                    font-size: 28px;
+                    font-weight: 300;
+                    color: AppTheme.foreground;
+                }
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+
+            VerticalLayout {
+                alignment: center;
+                Dropdown {
+                    width: 180px;
+                    icon: "sliders";
+                    model: AppApi.theme-names;
+                    current-index: AppApi.theme-index;
+                    selected(i) => {
+                        AppApi.select-theme(i);
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            vertical-stretch: 1;
+            spacing: 56px;
+
+            // Left: recent projects.
+            VerticalLayout {
+                horizontal-stretch: 3;
+                min-width: 320px;
+                spacing: 12px;
+
+                Text {
+                    text: "Open recent";
+                    font-size: 20px;
+                    font-weight: 400;
+                    color: AppTheme.foreground;
+                }
+
+                if WelcomeApi.recent.length == 0: Rectangle {
+                    height: 140px;
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: AppTheme.border;
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 6px;
+                        HorizontalLayout {
+                            alignment: center;
+                            Icon {
+                                kind: "folder";
+                                size: 28px;
+                            }
+                        }
+                        Text {
+                            text: "No recent projects yet";
+                            horizontal-alignment: center;
+                            font-weight: 600;
+                            color: AppTheme.foreground;
+                        }
+                        Text {
+                            text: "Projects you create or open appear here.";
+                            horizontal-alignment: center;
+                            color: AppTheme.foreground-muted;
+                        }
+                    }
+                }
+
+                if WelcomeApi.recent.length > 0: Text {
+                    text: "Recent";
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: AppTheme.foreground-muted;
+                }
+
+                ScrollView {
+                    vertical-stretch: 1;
+                    content-height: WelcomeApi.recent.length * 60px;
+                    for item[i] in WelcomeApi.recent: Rectangle {
+                        y: i * 60px;
+                        width: parent.width;
+                        height: 58px;
+                        border-radius: 4px;
+                        background: row-touch.pressed ? AppTheme.surface-alt : row-touch.has-hover ? AppTheme.accent.transparentize(0.9) : transparent;
+
+                        row-touch := TouchArea {
+                            mouse-cursor: MouseCursor.pointer;
+                            clicked => {
+                                WelcomeApi.open-recent(i);
+                            }
+                        }
+
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 6px;
+                            spacing: 14px;
+
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 32px;
+                                    height: 32px;
+                                    border-radius: 6px;
+                                    background: item.missing ? AppTheme.surface-alt : AppTheme.accent.transparentize(0.85);
+                                    FileIcon {
+                                        kind: "folder";
+                                        size: 18px;
+                                    }
+                                }
+                            }
+
+                            VerticalLayout {
+                                alignment: center;
+                                horizontal-stretch: 1;
+                                spacing: 2px;
+                                Text {
+                                    text: item.missing ? item.name + "  (missing)" : item.name;
+                                    font-size: 14px;
+                                    font-weight: 600;
+                                    color: item.missing ? AppTheme.foreground-muted : AppTheme.foreground;
+                                    overflow: elide;
+                                }
+
+                                Text {
+                                    text: item.path;
+                                    color: AppTheme.foreground-muted;
+                                    font-size: 12px;
+                                    overflow: elide;
+                                }
+                            }
+
+                            if row-touch.has-hover: VerticalLayout {
+                                alignment: center;
+                                IconButton {
+                                    icon: "close";
+                                    tooltip: "Remove from list";
+                                    clicked => {
+                                        WelcomeApi.remove-recent(i);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Right: get started.
+            VerticalLayout {
+                horizontal-stretch: 2;
+                min-width: 300px;
+                max-width: 460px;
+                spacing: 12px;
+
+                Text {
+                    text: "Get started";
+                    font-size: 20px;
+                    font-weight: 400;
+                    color: AppTheme.foreground;
+                }
+
+                Rectangle {
+                    height: 4px;
+                }
+
+                ActionCard {
+                    icon: "new-file";
+                    title: "Create a new project";
+                    description: "Choose a Python template and environment to get started.";
+                    clicked => {
+                        WelcomeApi.new-project();
+                    }
+                }
+
+                ActionCard {
+                    icon: "folder-open";
+                    title: "Open a local folder";
+                    description: "Open any folder. Apex reads .venv and manage.py to set things up.";
+                    expanded: root.open-expanded;
+                    clicked => {
+                        root.open-expanded = true;
+                    }
+
+                    if root.open-expanded: HorizontalLayout {
+                        spacing: 8px;
+                        folder := ApexLineEdit {
+                            text <=> WelcomeApi.open-path;
+                            placeholder: "Absolute path of a project folder";
+                            mono: true;
+                            init => {
+                                self.focus();
+                            }
+                            accepted(path) => {
+                                WelcomeApi.open-folder(path);
+                            }
+                        }
+
+                        ApexButton {
+                            text: "Open";
+                            kind: 1;
+                            enabled: WelcomeApi.open-path != "";
+                            clicked => {
+                                WelcomeApi.open-folder(WelcomeApi.open-path);
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    vertical-stretch: 1;
+                }
+
+                HorizontalLayout {
+                    alignment: end;
+                    Text {
+                        text: "Python first. Native and fast.";
+                        color: AppTheme.foreground-muted;
+                        font-size: 12px;
+                    }
+                }
+            }
+        }
+    }
+}
+}

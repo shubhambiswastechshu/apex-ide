@@ -1,0 +1,41 @@
+{
+  "id": "apex-vs-light",
+  "name": "Apex VS Light",
+  "kind": "light",
+  "ui": {
+    "background": "#eeeef2",
+    "surface": "#f7f7f9",
+    "surface_alt": "#e6e6eb",
+    "border": "#d4d4da",
+    "foreground": "#1e1e1e",
+    "foreground_muted": "#5e5e66",
+    "accent": "#6553d6",
+    "accent_foreground": "#ffffff",
+    "selection": "#add6ff",
+    "error": "#c42b1c",
+    "warning": "#8a5a00",
+    "success": "#0f7b0f",
+    "editor_background": "#ffffff",
+    "editor_foreground": "#1e1e1e",
+    "gutter_foreground": "#6e7681",
+    "line_highlight": "#f3f3f6"
+  },
+  "syntax": {
+    "keyword": "#0000ff",
+    "string": "#a31515",
+    "number": "#098658",
+    "comment": {
+      "color": "#008000",
+      "italic": true
+    },
+    "function": "#74531f",
+    "type": "#267f99",
+    "variable": "#001080",
+    "constant": "#0070c1",
+    "operator": "#1e1e1e",
+    "punctuation": "#3b3b3b",
+    "decorator": "#af00db",
+    "builtin": "#2b6cb0",
+    "plain": "#1e1e1e"
+  }
+}

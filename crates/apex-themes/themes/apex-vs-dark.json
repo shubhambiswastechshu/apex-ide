@@ -1,0 +1,41 @@
+{
+  "id": "apex-vs-dark",
+  "name": "Apex VS Dark",
+  "kind": "dark",
+  "ui": {
+    "background": "#1a1a1d",
+    "surface": "#202023",
+    "surface_alt": "#2c2c31",
+    "border": "#38383e",
+    "foreground": "#e8e8ec",
+    "foreground_muted": "#a3a3ad",
+    "accent": "#7160e8",
+    "accent_foreground": "#ffffff",
+    "selection": "#264f78",
+    "error": "#f48771",
+    "warning": "#e0b45a",
+    "success": "#89d185",
+    "editor_background": "#1f1f1f",
+    "editor_foreground": "#d4d4d4",
+    "gutter_foreground": "#858585",
+    "line_highlight": "#2a2a2e"
+  },
+  "syntax": {
+    "keyword": "#569cd6",
+    "string": "#d69d85",
+    "number": "#b5cea8",
+    "comment": {
+      "color": "#6a9955",
+      "italic": true
+    },
+    "function": "#dcdcaa",
+    "type": "#4ec9b0",
+    "variable": "#9cdcfe",
+    "constant": "#4fc1ff",
+    "operator": "#d4d4d4",
+    "punctuation": "#b4b4b4",
+    "decorator": "#c586c0",
+    "builtin": "#8ab4f8",
+    "plain": "#d4d4d4"
+  }
+}

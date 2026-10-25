@@ -1,0 +1,41 @@
+{
+  "id": "apex-midnight",
+  "name": "Apex Midnight",
+  "kind": "dark",
+  "ui": {
+    "background": "#0b1220",
+    "surface": "#111a2e",
+    "surface_alt": "#1a2540",
+    "border": "#22304f",
+    "foreground": "#d6deeb",
+    "foreground_muted": "#8b98b5",
+    "accent": "#5b8cff",
+    "accent_foreground": "#0b1220",
+    "selection": "#1f3a66",
+    "error": "#ff6b81",
+    "warning": "#ffcb6b",
+    "success": "#7fdc9f",
+    "editor_background": "#0d1526",
+    "editor_foreground": "#c8d3f5",
+    "gutter_foreground": "#5c6a8a",
+    "line_highlight": "#131e36"
+  },
+  "syntax": {
+    "keyword": "#c792ea",
+    "string": "#addb67",
+    "number": "#f78c6c",
+    "comment": {
+      "color": "#7383a3",
+      "italic": true
+    },
+    "function": "#82aaff",
+    "type": "#ffcb6b",
+    "variable": "#c8d3f5",
+    "constant": "#f07178",
+    "operator": "#89ddff",
+    "punctuation": "#8fa1c7",
+    "decorator": "#ff9cac",
+    "builtin": "#7fdbca",
+    "plain": "#c8d3f5"
+  }
+}

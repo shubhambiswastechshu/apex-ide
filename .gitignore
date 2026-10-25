@@ -1,0 +1,19 @@
+/target
+**/__pycache__
+.venv
+
+# Editors and OS files
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Rust
+**/*.rs.bk
+*.pdb
+
+# Python projects created while testing
+*.pyc
+.env

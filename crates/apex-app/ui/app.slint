@@ -1,0 +1,171 @@
+// Root of the Apex IDE UI. Picks the active screen and re-exports the
+// globals and structs that Rust talks to (see api.slint and theme.slint).
+
+import { Palette } from "std-widgets.slint";
+// Bundled fonts (SIL OFL 1.1, licenses next to the files): Cascadia Code
+// for code everywhere, Inter as the UI font where Segoe UI is missing.
+import "fonts/CascadiaCode-Regular.ttf";
+import "fonts/CascadiaCode-Bold.ttf";
+import "fonts/CascadiaCode-Italic.ttf";
+import "fonts/Inter-Regular.ttf";
+import "fonts/Inter-SemiBold.ttf";
+import "fonts/Inter-Bold.ttf";
+import { AppTheme } from "theme.slint";
+import {
+    AppApi, WelcomeApi, NewProjectApi, WorkspaceApi, ToolsApi, DbApi, PluginsApi,
+    RecentProject, TemplateCard, StepRow, TreeItem, EditorTab, HlRun, HlLine,
+    OutputLine, Problem, DriverCard, DbTable, ResultRow, PluginRow, CommandRow,
+} from "api.slint";
+import { ApexButton, IconButton, Modal } from "widgets.slint";
+import {
+    ShellApi, MenuItem, MenuDef, Segment, PaletteItem, ShortcutRow, FindRow, SwitcherItem,
+} from "shell_api.slint";
+import {
+    PaletteOverlay, ShortcutsDialog, SettingsDialog, OpenFolderDialog, TabSwitcher,
+} from "shell.slint";
+import { WelcomeScreen } from "welcome.slint";
+import { NewProjectScreen } from "new_project.slint";
+import { WorkspaceScreen } from "workspace.slint";
+import { EditorApi, EdPane, EdLine, EdRun, EdSpan, EdCompletion, EdNavItem, EdTab, EdSplitter, EditorWindow } from "editor.slint";
+
+export {
+    AppTheme,
+    ShellApi, MenuItem, MenuDef, Segment, PaletteItem, ShortcutRow, FindRow, SwitcherItem,
+    EditorApi, EdPane, EdLine, EdRun, EdSpan, EdCompletion, EdNavItem, EdTab, EdSplitter, EditorWindow,
+    AppApi, WelcomeApi, NewProjectApi, WorkspaceApi, ToolsApi, DbApi, PluginsApi,
+    RecentProject, TemplateCard, StepRow, TreeItem, EditorTab, HlRun, HlLine,
+    OutputLine, Problem, DriverCard, DbTable, ResultRow, PluginRow, CommandRow,
+}
+
+export component AppWindow inherits Window {
+    property <bool> dark: AppTheme.dark;
+
+    title: WorkspaceApi.project-name == "" ? "Apex IDE" : WorkspaceApi.project-name + " - Apex IDE";
+    preferred-width: 1280px;
+    preferred-height: 800px;
+    min-width: 860px;
+    min-height: 560px;
+    background: AppTheme.background;
+    default-font-size: AppTheme.ui-font-size;
+    default-font-family: AppTheme.ui-font;
+
+    // Keep the std widgets (scroll bars) in step with the theme's kind.
+    init => {
+        Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light;
+    }
+    changed dark => {
+        Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light;
+    }
+
+    // Every key nothing focused consumed lands here and is resolved through
+    // the command registry (src/commands.rs).
+    keys := FocusScope {
+        init => {
+            self.focus();
+        }
+        capture-key-pressed(e) => {
+            if ShellApi.key-capture(e.text, e.modifiers.control, e.modifiers.alt, e.modifiers.shift, e.modifiers.meta) {
+                return accept;
+            }
+            reject
+        }
+        key-pressed(e) => {
+            if ShellApi.key(e.text, e.modifiers.control, e.modifiers.alt, e.modifiers.shift, e.modifiers.meta) {
+                return accept;
+            }
+            reject
+        }
+        // Releasing Ctrl ends the Ctrl+Tab switcher.
+        capture-key-released(e) => {
+            if ShellApi.key-released(e.text) {
+                return accept;
+            }
+            reject
+        }
+
+        if AppApi.screen == 0: WelcomeScreen { }
+        if AppApi.screen == 1: NewProjectScreen { }
+        if AppApi.screen == 2: WorkspaceScreen { }
+    }
+
+    property <int> refocus: ShellApi.refocus;
+    changed refocus => {
+        keys.focus();
+    }
+
+    if ShellApi.palette-open: PaletteOverlay { }
+    if ShellApi.shortcuts-open: ShortcutsDialog { }
+    if ShellApi.settings-open: SettingsDialog { }
+    if ShellApi.open-folder-open: OpenFolderDialog { }
+    if ShellApi.switcher-open: TabSwitcher { }
+
+    // Notices outside the workspace (which shows them in its status bar).
+    if AppApi.screen != 2 && AppApi.notice != "": Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: parent.height - self.height - 16px;
+        width: min(parent.width - 40px, toast.preferred-width);
+        height: toast.preferred-height;
+        border-radius: 8px;
+        background: AppTheme.popup-background;
+        border-width: 1px;
+        border-color: AppTheme.popup-border;
+        drop-shadow-blur: 20px;
+        drop-shadow-offset-y: 6px;
+        drop-shadow-color: AppTheme.popup-shadow;
+
+        // Severity stripe.
+        Rectangle {
+            x: 0px;
+            width: 4px;
+            border-top-left-radius: 8px;
+            border-bottom-left-radius: 8px;
+            background: AppApi.notice-kind == 2 ? AppTheme.error : AppApi.notice-kind == 1 ? AppTheme.warning : AppApi.notice-kind == 3 ? AppTheme.success : AppTheme.accent;
+        }
+
+        toast := HorizontalLayout {
+            padding: 10px;
+            padding-left: 16px;
+            spacing: 10px;
+            Text {
+                text: AppApi.notice;
+                wrap: word-wrap;
+                max-width: 640px;
+                vertical-alignment: center;
+                color: AppTheme.foreground;
+            }
+
+            IconButton {
+                icon: "close";
+                clicked => {
+                    AppApi.dismiss-notice();
+                }
+            }
+        }
+    }
+
+    if AppApi.confirm-quit: Modal {
+        title: "Quit Apex IDE?";
+        message: "Some files have unsaved changes.";
+        ApexButton {
+            text: "Cancel";
+            clicked => {
+                AppApi.confirm-quit = false;
+            }
+        }
+
+        ApexButton {
+            text: "Quit Without Saving";
+            clicked => {
+                AppApi.quit-discard();
+            }
+        }
+
+        ApexButton {
+            text: "Save All and Quit";
+            kind: 1;
+            clicked => {
+                AppApi.quit-save-all();
+            }
+        }
+    }
+}

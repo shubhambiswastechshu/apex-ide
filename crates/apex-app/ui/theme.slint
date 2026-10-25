@@ -1,0 +1,83 @@
+// The active theme. Rust fills every property from an `apex_themes::Theme`
+// (see src/theming.rs); every color in the UI must come from here so that
+// switching themes restyles the whole window. Defaults mirror "apex-dark"
+// so the UI previews sensibly before Rust applies the real theme.
+
+export global AppTheme {
+    in-out property <bool> dark: true;
+
+    in-out property <color> background: #1e1f22;
+    in-out property <color> surface: #2b2d30;
+    in-out property <color> surface-alt: #393b40;
+    in-out property <color> border: #43454a;
+    in-out property <color> foreground: #dfe1e5;
+    in-out property <color> foreground-muted: #9a9da3;
+    in-out property <color> accent: #2e6ae6;
+    in-out property <color> accent-foreground: #ffffff;
+    in-out property <color> selection: #214283;
+    in-out property <color> error: #f75464;
+    in-out property <color> warning: #e5a54b;
+    in-out property <color> success: #5fb865;
+    in-out property <color> editor-background: #1e1f22;
+    in-out property <color> editor-foreground: #bcbec4;
+    in-out property <color> gutter-foreground: #6f737a;
+    in-out property <color> line-highlight: #26282e;
+
+    in-out property <string> editor-font: "Consolas";
+    in-out property <length> editor-font-size: 14px;
+    // Density: Compact (default) packs rows and bars tightly.
+    in-out property <bool> compact: true;
+    in-out property <length> ui-font-size: root.compact ? 12px : 13px;
+    out property <length> row-height: root.compact ? 22px : 26px;
+    out property <length> menu-height: root.compact ? 24px : 30px;
+    out property <length> toolbar-height: root.compact ? 28px : 36px;
+    out property <length> control-height: root.compact ? 22px : 28px;
+    out property <length> tab-height: root.compact ? 26px : 32px;
+    out property <length> title-height: root.compact ? 22px : 26px;
+    out property <length> status-height: root.compact ? 22px : 26px;
+    out property <length> gap: root.compact ? 4px : 8px;
+
+    // Motion: short ease-out fades and slides.
+    out property <duration> fast: 120ms;
+    out property <duration> normal: 160ms;
+
+    // Font families. `ui-font` is used for all chrome text, `code-font` for
+    // the editor, terminal and other monospaced views.
+    in-out property <string> ui-font: "Segoe UI";
+    in-out property <string> code-font: "Cascadia Code";
+    in-out property <length> code-font-size: 14px;
+
+    // Window chrome (title/menu bar, dock frame, document tabs, status bar).
+    // Themes like "Apex VS Blue" set these explicitly; otherwise Rust derives
+    // them from the colors above. `framed` is true for such themes.
+    in-out property <bool> framed: true;
+    in-out property <color> title-bar: #ccd5f0;
+    in-out property <color> title-bar-foreground: #1e1e1e;
+    in-out property <color> frame: #5d6b99;
+    in-out property <color> frame-foreground: #ffffff;
+    in-out property <color> tab-active: #f5cc84;
+    in-out property <color> tab-active-foreground: #1e1e1e;
+    in-out property <color> status-bar: #40508d;
+    in-out property <color> status-bar-foreground: #ffffff;
+
+    // Popups, menus, completion lists, tooltips.
+    in-out property <color> popup-background: #2b2b2b;
+    in-out property <color> popup-border: #454545;
+    in-out property <color> popup-selection: #3a3550;
+    in-out property <color> popup-shadow: #00000080;
+
+    // Syntax token colours (mirrors apex_themes::TokenKind).
+    in-out property <color> syntax-keyword: #569cd6;
+    in-out property <color> syntax-string: #ce9178;
+    in-out property <color> syntax-number: #b5cea8;
+    in-out property <color> syntax-comment: #6a9955;
+    in-out property <color> syntax-function: #dcdcaa;
+    in-out property <color> syntax-type: #4ec9b0;
+    in-out property <color> syntax-variable: #9cdcfe;
+    in-out property <color> syntax-constant: #4fc1ff;
+    in-out property <color> syntax-operator: #d4d4d4;
+    in-out property <color> syntax-punctuation: #d4d4d4;
+    in-out property <color> syntax-decorator: #dcdcaa;
+    in-out property <color> syntax-builtin: #4ec9b0;
+    in-out property <color> syntax-plain: #d4d4d4;
+}

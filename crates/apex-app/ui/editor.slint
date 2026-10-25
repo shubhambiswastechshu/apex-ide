@@ -1,0 +1,1490 @@
+// The code editor: a custom, virtualised text view driven entirely by Rust
+// (src/editor/). Rust sends only the rows that are on screen (as coloured
+// token runs), the caret, selections and decorations; this file paints them
+// and reports keys, mouse and the viewport back through `EditorApi`.
+//
+// Layout of one editor pane (Visual Studio style):
+//   [ package banner (optional)                                  ]
+//   [ navigation bar: class scope | function scope               ]
+//   [ gutter | code                                    | minimap ]
+//   [ status strip: zoom | issues            | Ln Ch SPC CRLF   ]
+
+import { AppTheme } from "theme.slint";
+import { FileIcon, Icon, FileKinds } from "widgets.slint";
+
+// One coloured piece of a line. `col` is its visual column (tabs expanded).
+// kind: apex_editor::TokenKind order (0 keyword ... 12 plain).
+export struct EdRun {
+    text: string,
+    col: int,
+    kind: int,
+    bold: bool,
+    italic: bool,
+}
+
+// One painted row. `row` is the display row (folded lines are skipped),
+// `line` the 0-based buffer line. fold: 0 none, 1 open, 2 folded.
+export struct EdLine {
+    row: int,
+    line: int,
+    runs: [EdRun],
+    fold: int,
+    guides: int,
+    visible: bool,
+}
+
+// A highlighted stretch of one row, in visual columns.
+// kind: 0 selection, 1 matching bracket, 2 error squiggle, 3 warning
+// squiggle, 4 snippet placeholder, 5 missing-package squiggle.
+export struct EdSpan {
+    row: int,
+    col: int,
+    cols: int,
+    kind: int,
+    path: string,
+}
+
+// kind: apex_editor::completion::CompletionKind order.
+export struct EdCompletion {
+    label: string,
+    detail: string,
+    badge: string,
+    kind: int,
+}
+
+export struct EdNavItem {
+    label: string,
+    line: int,
+    depth: int,
+    is-class: bool,
+}
+
+// One tab of an editor group; Rust computes `width` so it can map drop
+// positions to tab indices.
+export struct EdTab {
+    title: string,
+    dirty: bool,
+    active: bool,
+    width: length,
+}
+
+// A draggable splitter between editor groups (area coordinates).
+export struct EdSplitter {
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+    vertical: bool,
+}
+
+// Everything one editor pane shows. Rust replaces it whenever something
+// changes; `lines` and `spans` are long-lived models updated in place.
+export struct EdPane {
+    has-file: bool,
+    lines: [EdLine],
+    spans: [EdSpan],
+    rows: int,
+    max-cols: int,
+    gutter-digits: int,
+    caret-row: int,
+    caret-col: int,
+    caret-serial: int,
+    show-current-line: bool,
+    // Scroll requests: applied whenever `scroll-serial` changes.
+    scroll-serial: int,
+    scroll-to-x: length,
+    scroll-to-y: length,
+    focus-serial: int,
+    // Completion popup.
+    popup-open: bool,
+    popup-items: [EdCompletion],
+    popup-selected: int,
+    popup-total: int,
+    popup-row: int,
+    popup-col: int,
+    popup-doc: string,
+    // Navigation bar.
+    nav-class: string,
+    nav-func: string,
+    nav-items: [EdNavItem],
+    nav-classes: [EdNavItem],
+    // Status strip.
+    zoom: int,
+    errors: int,
+    warnings: int,
+    ln: int,
+    ch: int,
+    indent-text: string,
+    eol-text: string,
+    // Minimap: an image of rows `minimap-first ..` at 2 px per row.
+    minimap: image,
+    minimap-first: int,
+    // Package banner ("Package requirements X are not installed").
+    banner: string,
+    banner-busy: bool,
+    // Quick fix shown at the end of the caret line (empty: none).
+    quickfix: string,
+    quickfix-row: int,
+    quickfix-col: int,
+    // Find / go-to-line bar: 0 hidden, 1 find, 2 go to line.
+    prompt-mode: int,
+    prompt-text: string,
+    prompt-info: string,
+    prompt-serial: int,
+    // Editor group: its tabs and where it sits in the editor area.
+    tabs: [EdTab],
+    gx: length,
+    gy: length,
+    gw: length,
+    gh: length,
+    focused: bool,
+    floating: bool,
+}
+
+export global EditorApi {
+    in-out property <[EdPane]> panes;
+    // Reports the viewport of pane `int`: scroll x/y, code area width and
+    // height, char width, line height.
+    callback viewport(int, length, length, length, length, length, length);
+    // text, ctrl, shift, alt -> handled
+    callback key(int, string, bool, bool, bool) -> bool;
+    // row, visual column, shift, ctrl, click count
+    callback mouse-down(int, int, int, bool, bool, int);
+    callback mouse-drag(int, int, int);
+    callback mouse-up(int);
+    callback fold-click(int, int);
+    callback popup-click(int, int);
+    callback popup-scroll(int, int);
+    callback nav-jump(int, int);
+    callback focus-changed(int, bool);
+    // pane, +1 zoom in / -1 zoom out / 0 reset
+    callback zoom(int, int);
+    // pane, percent (from the zoom drop-down)
+    callback set-zoom(int, int);
+    // Offered zoom levels, percent (apex_core::ZOOM_STEPS).
+    in-out property <[int]> zoom-steps: [50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300];
+    callback banner-install(int);
+    callback banner-ignore(int);
+    callback quickfix(int);
+    // Runs a named editor command (see src/editor/mod.rs `COMMANDS`):
+    // "editor.undo", "editor.find", "editor.goToLine", ...
+    callback command(int, string);
+    callback prompt-changed(int, string);
+    callback prompt-accept(int, string, bool);
+    callback prompt-close(int);
+
+    // Editor groups (splits, drag and drop, windows).
+    in-out property <[EdSplitter]> splitters;
+    in-out property <bool> drop-visible;
+    in-out property <length> drop-x;
+    in-out property <length> drop-y;
+    in-out property <length> drop-w;
+    in-out property <length> drop-h;
+    // The editor area's window position and size.
+    callback area-resized(length, length, length, length);
+    callback tab-clicked(int, int);
+    callback tab-close(int, int);
+    // pane, tab, window x, window y, released
+    callback tab-drag(int, int, length, length, bool);
+    callback splitter-drag(int, length);
+    // pane, "split-right" | "split-down" | "new-window" | "dock" | "close-others"
+    callback group-action(int, string);
+}
+
+component KindBadge inherits Rectangle {
+    in property <int> kind;
+    in property <string> badge;
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    background: kind == 0 ? AppTheme.syntax-keyword
+        : kind == 1 ? AppTheme.warning
+        : kind == 2 ? AppTheme.syntax-function
+        : kind == 3 ? AppTheme.syntax-type
+        : kind == 4 ? AppTheme.syntax-builtin
+        : kind == 5 ? AppTheme.syntax-variable
+        : kind == 6 ? AppTheme.syntax-constant
+        : kind == 7 ? AppTheme.syntax-variable
+        : AppTheme.foreground-muted;
+    Text {
+        text: badge;
+        color: AppTheme.editor-background;
+        font-size: 10px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component NavCombo inherits Rectangle {
+    in property <string> text;
+    in property <bool> open;
+    callback clicked();
+    height: 20px;
+    background: AppTheme.editor-background;
+    border-width: 1px;
+    border-color: ta.has-hover || open ? AppTheme.accent : AppTheme.border;
+    ta := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    Text {
+        x: 6px;
+        width: parent.width - 24px;
+        text: root.text;
+        color: AppTheme.foreground;
+        font-family: AppTheme.ui-font;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    Text {
+        x: parent.width - 16px;
+        text: "▾";
+        color: AppTheme.foreground-muted;
+        vertical-alignment: center;
+    }
+}
+
+// The zoom box of the status strip ("100 %" with a drop-down of levels),
+// like Visual Studio's. Opens upwards since it sits at the bottom.
+component ZoomCombo inherits Rectangle {
+    in property <int> index;
+    in property <int> zoom;
+    width: label.preferred-width + 24px;
+    height: 18px;
+    border-radius: 2px;
+    border-width: 1px;
+    border-color: ta.has-hover ? AppTheme.accent : transparent;
+    background: ta.has-hover ? AppTheme.surface-alt : transparent;
+    accessible-role: combobox;
+    accessible-label: "Zoom";
+    accessible-value: root.zoom + " %";
+
+    label := Text {
+        x: 5px;
+        text: root.zoom + " %";
+        color: AppTheme.foreground;
+        vertical-alignment: center;
+    }
+    Text {
+        x: parent.width - 13px;
+        text: "▾";
+        color: AppTheme.foreground-muted;
+        vertical-alignment: center;
+    }
+    ta := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => {
+            menu.show();
+        }
+        scroll-event(ev) => {
+            if ev.modifiers.control {
+                EditorApi.zoom(root.index, ev.delta-y > 0 ? 1 : -1);
+                return accept;
+            }
+            reject
+        }
+    }
+
+    menu := PopupWindow {
+        x: 0px;
+        y: -self.height - 2px;
+        width: 92px;
+        height: list.preferred-height;
+        Rectangle {
+            background: AppTheme.popup-background;
+            border-width: 1px;
+            border-color: AppTheme.popup-border;
+            border-radius: 4px;
+            drop-shadow-blur: 12px;
+            drop-shadow-offset-y: 2px;
+            drop-shadow-color: AppTheme.popup-shadow;
+        }
+        list := VerticalLayout {
+            padding: 3px;
+            for z in EditorApi.zoom-steps: Rectangle {
+                height: 20px;
+                border-radius: 3px;
+                background: zt.has-hover ? AppTheme.popup-selection : transparent;
+                Text {
+                    x: 10px;
+                    text: z + " %";
+                    font-weight: z == root.zoom ? 700 : 400;
+                    color: AppTheme.foreground;
+                    vertical-alignment: center;
+                }
+                zt := TouchArea {
+                    clicked => {
+                        EditorApi.set-zoom(root.index, z);
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component CodeEditor inherits Rectangle {
+    in property <int> index: 0;
+    property <EdPane> pane: EditorApi.panes[root.index];
+
+    // Font metrics, measured from the code font itself.
+    property <length> font-size: AppTheme.code-font-size * pane.zoom / 100;
+    property <length> cw: measure.preferred-width / 20;
+    // The font's own line height plus a little air: 13 px Cascadia Code
+    // gives 18 px rows at 100%, as in Visual Studio.
+    property <length> lh: round(measure.preferred-height * 1.2 / 1px) * 1px;
+    property <length> pad: 4px;
+    property <length> gutter-w: (max(pane.gutter-digits, 2) + 1) * root.cw + 26px;
+    property <length> minimap-w: 96px;
+
+    // Scroll position (owned here; Rust asks for changes via scroll-serial).
+    property <length> sx;
+    property <length> sy;
+    property <length> max-sy: max(0px, (pane.rows - 1) * root.lh);
+    property <length> max-sx: max(0px, pane.max-cols * root.cw + 3 * root.pad + 40px - code.width);
+    property <int> scroll-serial: pane.scroll-serial;
+    property <int> focus-serial: pane.focus-serial;
+    property <int> caret-serial: pane.caret-serial;
+    property <int> prompt-serial: pane.prompt-serial;
+    property <bool> caret-on: true;
+    property <bool> dragging;
+    property <int> nav-open: 0;
+
+    background: AppTheme.editor-background;
+    forward-focus: fs;
+
+    function report() {
+        EditorApi.viewport(root.index, root.sx, root.sy, code.width, code.height, root.cw, root.lh);
+    }
+    function scroll-by(dx: length, dy: length) {
+        root.sx = clamp(root.sx + dx, 0px, root.max-sx);
+        root.sy = clamp(root.sy + dy, 0px, root.max-sy);
+    }
+    function row-at(y: length) -> int {
+        floor((y + root.sy) / root.lh)
+    }
+    function col-at(x: length) -> int {
+        max(0, round((x + root.sx - root.pad) / root.cw))
+    }
+
+    init => {
+        root.sx = pane.scroll-to-x;
+        root.sy = pane.scroll-to-y;
+        root.report();
+        // Created after Rust asked for the focus (the first tab opened, a
+        // split): focus-serial did not change from here, so take it now.
+        if pane.focused && pane.focus-serial > 0 {
+            fs.focus();
+        }
+    }
+    changed scroll-serial => {
+        root.sx = clamp(pane.scroll-to-x, 0px, max(root.max-sx, pane.scroll-to-x));
+        root.sy = clamp(pane.scroll-to-y, 0px, max(root.max-sy, pane.scroll-to-y));
+    }
+    changed focus-serial => {
+        fs.focus();
+    }
+    changed prompt-serial => {
+        pinput.text = pane.prompt-text;
+        if pane.prompt-mode != 0 {
+            pinput.focus();
+            pinput.select-all();
+        } else {
+            fs.focus();
+        }
+    }
+    changed caret-serial => {
+        root.caret-on = true;
+    }
+    changed sx => {
+        root.report();
+    }
+    changed sy => {
+        root.report();
+    }
+    changed cw => {
+        root.report();
+    }
+    changed lh => {
+        root.report();
+    }
+    changed width => {
+        root.report();
+    }
+    changed height => {
+        root.report();
+    }
+
+    measure := Text {
+        visible: false;
+        text: "MMMMMMMMMMMMMMMMMMMM";
+        font-family: AppTheme.code-font;
+        font-size: root.font-size;
+    }
+
+    Timer {
+        interval: 530ms;
+        running: fs.has-focus;
+        triggered => {
+            root.caret-on = !root.caret-on;
+        }
+    }
+
+    fs := FocusScope {
+        focus-changed-event => {
+            EditorApi.focus-changed(root.index, self.has-focus);
+        }
+        key-pressed(event) => {
+            if EditorApi.key(root.index, event.text, event.modifiers.control, event.modifiers.shift, event.modifiers.alt) {
+                return accept;
+            }
+            reject
+        }
+
+        VerticalLayout {
+            // ------------------------------------------------ package banner
+            if pane.banner != "": Rectangle {
+                height: 30px;
+                background: AppTheme.surface;
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: AppTheme.border;
+                }
+
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    spacing: 12px;
+                    Text {
+                        text: "⚠";
+                        color: AppTheme.warning;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        text: pane.banner;
+                        color: AppTheme.foreground;
+                        font-family: AppTheme.ui-font;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+
+                    if pane.banner-busy: Text {
+                        text: "Installing…";
+                        color: AppTheme.foreground-muted;
+                        vertical-alignment: center;
+                    }
+                    if !pane.banner-busy: Text {
+                        text: "Install all";
+                        color: AppTheme.accent;
+                        vertical-alignment: center;
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                EditorApi.banner-install(root.index);
+                            }
+                        }
+                    }
+                    Text {
+                        text: "Ignore";
+                        color: AppTheme.accent;
+                        vertical-alignment: center;
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                EditorApi.banner-ignore(root.index);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ------------------------------------------------ navigation bar
+            navbar := Rectangle {
+                height: 26px;
+                background: AppTheme.surface;
+                HorizontalLayout {
+                    padding: 3px;
+                    spacing: 4px;
+                    NavCombo {
+                        text: pane.nav-class == "" ? "(module)" : pane.nav-class;
+                        open: root.nav-open == 1;
+                        clicked => {
+                            root.nav-open = root.nav-open == 1 ? 0 : 1;
+                        }
+                    }
+
+                    NavCombo {
+                        text: pane.nav-func == "" ? "(no function)" : pane.nav-func;
+                        open: root.nav-open == 2;
+                        clicked => {
+                            root.nav-open = root.nav-open == 2 ? 0 : 2;
+                        }
+                    }
+                }
+
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: AppTheme.border;
+                }
+            }
+
+            body := Rectangle {
+                vertical-stretch: 1;
+                clip: true;
+
+                // ------------------------------------------------ gutter
+                gutter := Rectangle {
+                    x: 0;
+                    width: root.gutter-w;
+                    height: parent.height;
+                    clip: true;
+                    background: AppTheme.editor-background;
+
+                    for l in pane.lines: Rectangle {
+                        visible: l.visible;
+                        y: l.row * root.lh - root.sy;
+                        height: root.lh;
+                        Text {
+                            x: 0;
+                            width: root.gutter-w - 26px;
+                            height: root.lh;
+                            text: l.line + 1;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                            font-family: AppTheme.code-font;
+                            font-size: root.font-size;
+                            color: l.row == pane.caret-row ? AppTheme.foreground : AppTheme.gutter-foreground;
+                        }
+
+                        if l.fold != 0: Rectangle {
+                            x: root.gutter-w - 20px;
+                            width: 14px;
+                            height: root.lh;
+                            Path {
+                                x: 3px;
+                                y: (root.lh - 8px) / 2;
+                                width: 8px;
+                                height: 8px;
+                                commands: l.fold == 2 ? "M 3 0 L 7 4 L 3 8" : "M 0 2 L 4 6 L 8 2";
+                                viewbox-width: 8;
+                                viewbox-height: 8;
+                                stroke: fold-ta.has-hover ? AppTheme.foreground : AppTheme.gutter-foreground;
+                                stroke-width: 1.2px;
+                                fill: transparent;
+                            }
+                            fold-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    EditorApi.fold-click(root.index, l.line);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ------------------------------------------------ code area
+                code := Rectangle {
+                    x: root.gutter-w;
+                    width: parent.width - root.gutter-w - root.minimap-w;
+                    height: parent.height;
+                    clip: true;
+
+                    ta := TouchArea {
+                        mouse-cursor: text;
+                        pointer-event(ev) => {
+                            if ev.button == PointerEventButton.left && ev.kind == PointerEventKind.down {
+                                root.nav-open = 0;
+                                fs.focus();
+                                root.dragging = true;
+                                EditorApi.mouse-down(root.index, root.row-at(self.mouse-y), root.col-at(self.mouse-x), ev.modifiers.shift, ev.modifiers.control, 1);
+                            }
+                            if ev.button == PointerEventButton.left && ev.kind == PointerEventKind.up {
+                                root.dragging = false;
+                                EditorApi.mouse-up(root.index);
+                            }
+                        }
+                        double-clicked => {
+                            EditorApi.mouse-down(root.index, root.row-at(self.mouse-y), root.col-at(self.mouse-x), false, false, 2);
+                        }
+                        moved => {
+                            if root.dragging && self.pressed {
+                                EditorApi.mouse-drag(root.index, root.row-at(self.mouse-y), root.col-at(self.mouse-x));
+                            }
+                        }
+                        scroll-event(ev) => {
+                            if ev.modifiers.control {
+                                EditorApi.zoom(root.index, ev.delta-y > 0 ? 1 : -1);
+                                return accept;
+                            }
+                            if ev.modifiers.shift {
+                                root.scroll-by(-ev.delta-y, 0px);
+                            } else {
+                                root.scroll-by(-ev.delta-x, -ev.delta-y);
+                            }
+                            accept
+                        }
+                    }
+
+                    // Current line: a thin outline box, as in Visual Studio.
+                    if pane.show-current-line && pane.caret-row >= 0: Rectangle {
+                        x: 0;
+                        y: pane.caret-row * root.lh - root.sy;
+                        width: parent.width;
+                        height: root.lh;
+                        border-width: 1px;
+                        border-color: AppTheme.line-highlight;
+                        background: fs.has-focus ? AppTheme.line-highlight.with-alpha(0.35) : transparent;
+                    }
+
+                    for s in pane.spans: Rectangle {
+                        x: root.pad + s.col * root.cw - root.sx;
+                        y: s.row * root.lh - root.sy;
+                        width: max(s.cols * root.cw, 2px);
+                        height: root.lh;
+                        background: s.kind == 0 ? AppTheme.selection
+                            : s.kind == 4 ? AppTheme.accent.with-alpha(0.18)
+                            : s.kind == 6 ? AppTheme.warning.with-alpha(0.35)
+                            : transparent;
+                        border-width: s.kind == 1 || s.kind == 4 ? 1px : 0px;
+                        border-color: s.kind == 1 ? AppTheme.foreground-muted : AppTheme.accent;
+                        if s.kind == 2 || s.kind == 3 || s.kind == 5: Path {
+                            y: root.lh - 4px;
+                            width: parent.width;
+                            height: 3px;
+                            commands: s.path;
+                            viewbox-x: 0;
+                            viewbox-y: 0;
+                            viewbox-width: s.cols * 4;
+                            viewbox-height: 3;
+                            stroke: s.kind == 2 ? AppTheme.error : s.kind == 3 ? AppTheme.warning : AppTheme.syntax-function;
+                            stroke-width: 1px;
+                            fill: transparent;
+                        }
+                    }
+
+                    // Rows: indent guides and coloured runs.
+                    for l in pane.lines: Rectangle {
+                        visible: l.visible;
+                        x: 0;
+                        y: l.row * root.lh - root.sy;
+                        width: parent.width;
+                        height: root.lh;
+                        for g in l.guides: Rectangle {
+                            x: root.pad + g * 4 * root.cw - root.sx + 1px;
+                            width: 1px;
+                            height: root.lh;
+                            background: AppTheme.border.with-alpha(0.7);
+                        }
+                        for r in l.runs: Text {
+                            x: root.pad + r.col * root.cw - root.sx;
+                            height: root.lh;
+                            vertical-alignment: center;
+                            text: r.text;
+                            font-family: AppTheme.code-font;
+                            font-size: root.font-size;
+                            font-weight: r.bold ? 700 : 400;
+                            font-italic: r.italic;
+                            color: r.kind == 0 ? AppTheme.syntax-keyword
+                                : r.kind == 1 ? AppTheme.syntax-string
+                                : r.kind == 2 ? AppTheme.syntax-number
+                                : r.kind == 3 ? AppTheme.syntax-comment
+                                : r.kind == 4 ? AppTheme.syntax-function
+                                : r.kind == 5 ? AppTheme.syntax-type
+                                : r.kind == 6 ? AppTheme.syntax-variable
+                                : r.kind == 7 ? AppTheme.syntax-constant
+                                : r.kind == 8 ? AppTheme.syntax-operator
+                                : r.kind == 9 ? AppTheme.syntax-punctuation
+                                : r.kind == 10 ? AppTheme.syntax-decorator
+                                : r.kind == 11 ? AppTheme.syntax-builtin
+                                : AppTheme.editor-foreground;
+                        }
+                        if l.fold == 2: Rectangle {
+                            x: root.pad + (l.runs.length > 0 ? (l.runs[l.runs.length - 1].col + l.runs[l.runs.length - 1].text.character-count) : 0) * root.cw - root.sx + root.cw;
+                            y: 3px;
+                            width: 3 * root.cw;
+                            height: root.lh - 6px;
+                            border-radius: 3px;
+                            border-width: 1px;
+                            border-color: AppTheme.border;
+                            Text {
+                                text: "…";
+                                color: AppTheme.foreground-muted;
+                                font-size: root.font-size * 0.9;
+                            }
+                        }
+                    }
+
+                    // Quick fix chip (missing package on the caret line).
+                    if pane.quickfix != "": Rectangle {
+                        x: root.pad + pane.quickfix-col * root.cw - root.sx;
+                        y: pane.quickfix-row * root.lh - root.sy + 1px;
+                        height: root.lh - 2px;
+                        width: qf-row.preferred-width;
+                        border-radius: 3px;
+                        background: qf-ta.has-hover ? AppTheme.warning.with-alpha(0.35) : AppTheme.warning.with-alpha(0.18);
+                        qf-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                EditorApi.quickfix(root.index);
+                            }
+                        }
+                        qf-row := HorizontalLayout {
+                            padding-left: 6px;
+                            padding-right: 6px;
+                            spacing: 4px;
+                            Text {
+                                text: "💡";
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: pane.quickfix;
+                                color: AppTheme.foreground;
+                                font-family: AppTheme.ui-font;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    // Caret.
+                    if pane.has-file: Rectangle {
+                        x: root.pad + pane.caret-col * root.cw - root.sx;
+                        y: pane.caret-row * root.lh - root.sy + 1px;
+                        width: 2px;
+                        height: root.lh - 2px;
+                        background: AppTheme.editor-foreground;
+                        visible: fs.has-focus && root.caret-on;
+                    }
+
+                    // Horizontal scroll bar.
+                    if root.max-sx > 0: Rectangle {
+                        y: parent.height - 8px;
+                        height: 8px;
+                        width: parent.width;
+                        background: transparent;
+                        hthumb := Rectangle {
+                            property <length> track: parent.width;
+                            property <float> frac: code.width / (code.width + root.max-sx);
+                            x: (track - self.width) * (root.sx / root.max-sx);
+                            width: max(30px, track * frac);
+                            height: 6px;
+                            y: 1px;
+                            border-radius: 3px;
+                            background: htouch.has-hover || htouch.pressed ? AppTheme.foreground-muted.with-alpha(0.7) : AppTheme.foreground-muted.with-alpha(0.35);
+                            htouch := TouchArea {
+                                property <length> start-sx;
+                                pointer-event(ev) => {
+                                    if ev.kind == PointerEventKind.down {
+                                        self.start-sx = root.sx;
+                                    }
+                                }
+                                moved => {
+                                    if self.pressed {
+                                        root.sx = clamp(self.start-sx + (self.mouse-x - self.pressed-x) * root.max-sx / max(1px, hthumb.track - hthumb.width), 0px, root.max-sx);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Completion popup.
+                    if pane.popup-open && pane.popup-items.length > 0: popup := Rectangle {
+                        property <length> below: (pane.popup-row + 1) * root.lh - root.sy;
+                        property <length> h: pane.popup-items.length * 22px + 8px;
+                        x: min(max(0px, root.pad + pane.popup-col * root.cw - root.sx - 24px), max(0px, parent.width - self.width - 4px));
+                        y: self.below + self.h > parent.height && self.below - root.lh - self.h > 0 ? self.below - root.lh - self.h - 2px : self.below + 2px;
+                        width: pane.popup-doc != "" ? 760px : 440px;
+                        height: self.h;
+                        drop-shadow-blur: 14px;
+                        drop-shadow-color: AppTheme.popup-shadow;
+
+                        list := Rectangle {
+                            x: 0;
+                            width: 440px;
+                            height: parent.height;
+                            background: AppTheme.popup-background;
+                            border-width: 1px;
+                            border-color: AppTheme.popup-border;
+                            border-radius: 4px;
+                            TouchArea {
+                                scroll-event(ev) => {
+                                    EditorApi.popup-scroll(root.index, ev.delta-y > 0 ? -3 : 3);
+                                    accept
+                                }
+                            }
+
+                            for item[i] in pane.popup-items: Rectangle {
+                                x: 4px;
+                                y: 4px + i * 22px;
+                                width: parent.width - 8px;
+                                height: 22px;
+                                border-radius: 3px;
+                                background: i == pane.popup-selected ? AppTheme.popup-selection : item-ta.has-hover ? AppTheme.popup-selection.with-alpha(0.5) : transparent;
+                                item-ta := TouchArea {
+                                    clicked => {
+                                        EditorApi.popup-click(root.index, i);
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    padding-left: 4px;
+                                    padding-right: 6px;
+                                    spacing: 8px;
+                                    alignment: stretch;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        KindBadge {
+                                            kind: item.kind;
+                                            badge: item.badge;
+                                        }
+                                    }
+
+                                    Text {
+                                        text: item.label;
+                                        color: AppTheme.foreground;
+                                        font-family: AppTheme.code-font;
+                                        font-size: AppTheme.code-font-size * 0.95;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                        horizontal-stretch: 1;
+                                    }
+
+                                    Text {
+                                        text: item.detail;
+                                        color: AppTheme.foreground-muted;
+                                        font-family: AppTheme.ui-font;
+                                        vertical-alignment: center;
+                                        horizontal-alignment: right;
+                                        overflow: elide;
+                                        max-width: 180px;
+                                    }
+                                }
+                            }
+                        }
+
+                        if pane.popup-doc != "": Rectangle {
+                            x: 444px;
+                            width: parent.width - 444px;
+                            height: min(parent.height, doc-text.preferred-height + 16px);
+                            y: 0;
+                            background: AppTheme.popup-background;
+                            border-width: 1px;
+                            border-color: AppTheme.popup-border;
+                            border-radius: 4px;
+                            clip: true;
+                            doc-text := Text {
+                                x: 8px;
+                                y: 8px;
+                                width: parent.width - 16px;
+                                text: pane.popup-doc;
+                                wrap: word-wrap;
+                                color: AppTheme.foreground;
+                                font-family: AppTheme.code-font;
+                                font-size: AppTheme.code-font-size * 0.9;
+                            }
+                        }
+                    }
+                }
+
+                // Navigation drop-downs (over the code), scrollable.
+                if root.nav-open != 0: navpop := Rectangle {
+                    property <[EdNavItem]> list: root.nav-open == 1 ? pane.nav-classes : pane.nav-items;
+                    x: root.nav-open == 1 ? 3px : body.width / 2;
+                    y: 0;
+                    width: body.width / 2 - 6px;
+                    height: min(body.height - 10px, max(1, self.list.length) * 20px + 8px);
+                    background: AppTheme.popup-background;
+                    border-width: 1px;
+                    border-color: AppTheme.popup-border;
+                    drop-shadow-blur: 10px;
+                    drop-shadow-color: AppTheme.popup-shadow;
+                    clip: true;
+                    if navpop.list.length == 0: Text {
+                        x: 10px;
+                        y: 4px;
+                        height: 20px;
+                        text: "No definitions";
+                        color: AppTheme.foreground-muted;
+                        vertical-alignment: center;
+                    }
+                    Flickable {
+                        content-height: navpop.list.length * 20px + 8px;
+                        for item[i] in navpop.list: Rectangle {
+                            x: 4px;
+                            y: 4px + i * 20px;
+                            width: parent.width - 8px;
+                            height: 20px;
+                            background: nav-ta.has-hover ? AppTheme.popup-selection : transparent;
+                            nav-ta := TouchArea {
+                                clicked => {
+                                    root.nav-open = 0;
+                                    EditorApi.nav-jump(root.index, item.line);
+                                    fs.focus();
+                                }
+                            }
+
+                            Text {
+                                x: 6px + item.depth * 14px;
+                                text: (item.is-class ? "◆ " : "ƒ ") + item.label;
+                                color: item.is-class ? AppTheme.syntax-type : AppTheme.syntax-function;
+                                font-family: AppTheme.ui-font;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+
+                // ------------------------------------------------ minimap
+                minimap := Rectangle {
+                    x: parent.width - root.minimap-w;
+                    width: root.minimap-w;
+                    height: parent.height;
+                    background: AppTheme.editor-background;
+                    Rectangle {
+                        x: 0;
+                        width: 1px;
+                        background: AppTheme.border;
+                    }
+
+                    Image {
+                        x: 4px;
+                        y: 0;
+                        width: parent.width - 8px;
+                        height: self.source.height * 1px;
+                        source: pane.minimap;
+                        image-fit: fill;
+                    }
+
+                    // The visible part of the file.
+                    Rectangle {
+                        x: 1px;
+                        y: (root.sy / root.lh - pane.minimap-first) * 2px;
+                        width: parent.width - 1px;
+                        height: max(6px, code.height / root.lh * 2px);
+                        background: AppTheme.foreground.with-alpha(mm-ta.has-hover ? 0.12 : 0.07);
+                        border-width: 1px;
+                        border-color: AppTheme.accent.with-alpha(0.6);
+                    }
+
+                    mm-ta := TouchArea {
+                        function jump() {
+                            root.sy = clamp((pane.minimap-first + self.mouse-y / 2px) * root.lh - code.height / 2, 0px, root.max-sy);
+                        }
+                        pointer-event(ev) => {
+                            if ev.kind == PointerEventKind.down {
+                                self.jump();
+                            }
+                        }
+                        moved => {
+                            if self.pressed {
+                                self.jump();
+                            }
+                        }
+                        scroll-event(ev) => {
+                            root.scroll-by(0px, -ev.delta-y);
+                            accept
+                        }
+                    }
+                }
+
+                // Find / go-to-line bar (top right, as in Visual Studio).
+                Rectangle {
+                    visible: pane.prompt-mode != 0;
+                    x: body.width - self.width - root.minimap-w - 12px;
+                    y: 2px;
+                    width: 380px;
+                    height: 30px;
+                    background: AppTheme.popup-background;
+                    border-width: 1px;
+                    border-color: AppTheme.popup-border;
+                    drop-shadow-blur: 8px;
+                    drop-shadow-color: AppTheme.popup-shadow;
+                    HorizontalLayout {
+                        padding: 4px;
+                        spacing: 6px;
+                        Text {
+                            text: pane.prompt-mode == 2 ? "Line:" : "Find:";
+                            color: AppTheme.foreground-muted;
+                            vertical-alignment: center;
+                        }
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            background: AppTheme.editor-background;
+                            border-width: 1px;
+                            border-color: pinput.has-focus ? AppTheme.accent : AppTheme.border;
+                            pscope := FocusScope {
+                                key-pressed(event) => {
+                                    if event.text == Key.Escape {
+                                        EditorApi.prompt-close(root.index);
+                                        return accept;
+                                    }
+                                    if event.text == Key.Return {
+                                        EditorApi.prompt-accept(root.index, pinput.text, event.modifiers.shift);
+                                        return accept;
+                                    }
+                                    reject
+                                }
+                                pinput := TextInput {
+                                    x: 4px;
+                                    width: parent.width - 8px;
+                                    single-line: true;
+                                    vertical-alignment: center;
+                                    color: AppTheme.foreground;
+                                    font-family: AppTheme.code-font;
+                                    edited => {
+                                        EditorApi.prompt-changed(root.index, self.text);
+                                    }
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: pane.prompt-info;
+                            color: AppTheme.foreground-muted;
+                            vertical-alignment: center;
+                            min-width: 70px;
+                        }
+
+                        Text {
+                            text: "✕";
+                            color: AppTheme.foreground-muted;
+                            vertical-alignment: center;
+                            TouchArea {
+                                clicked => {
+                                    EditorApi.prompt-close(root.index);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Placeholder when no file is open in this pane.
+                if !pane.has-file: Text {
+                    text: "No file open";
+                    color: AppTheme.foreground-muted;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            // ------------------------------------------------ status strip
+            Rectangle {
+                height: 22px;
+                background: AppTheme.surface;
+                Rectangle {
+                    height: 1px;
+                    y: 0;
+                    background: AppTheme.border;
+                }
+
+                HorizontalLayout {
+                    padding-left: 6px;
+                    padding-right: 10px;
+                    spacing: 14px;
+                    VerticalLayout {
+                        alignment: center;
+                        ZoomCombo {
+                            index: root.index;
+                            zoom: pane.zoom;
+                        }
+                    }
+
+                    if pane.errors == 0 && pane.warnings == 0: Text {
+                        text: "✔ No issues found";
+                        color: AppTheme.success;
+                        vertical-alignment: center;
+                    }
+                    if pane.errors > 0 || pane.warnings > 0: Text {
+                        text: "⊗ " + pane.errors + "   ⚠ " + pane.warnings;
+                        color: pane.errors > 0 ? AppTheme.error : AppTheme.warning;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                    }
+
+                    Text {
+                        text: "Ln: " + pane.ln;
+                        color: AppTheme.foreground;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        text: "Ch: " + pane.ch;
+                        color: AppTheme.foreground;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        text: pane.indent-text;
+                        color: AppTheme.foreground;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        text: pane.eol-text;
+                        color: AppTheme.foreground;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Kept for older layouts; the editor itself is always highlighted now.
+export component HighlightView inherits Rectangle { }
+
+// ------------------------------------------------------------ editor groups
+
+component GroupTab inherits Rectangle {
+    in property <string> title;
+    in property <bool> dirty;
+    in property <bool> active;
+    in property <bool> group-focused;
+    callback select();
+    callback close();
+    callback menu(length, length);
+    // window x, window y, released
+    callback drag(length, length, bool);
+
+    property <bool> dragging;
+    property <color> text-color: root.active ? AppTheme.tab-active-foreground
+        : AppTheme.framed ? AppTheme.frame-foreground
+        : touch.has-hover ? AppTheme.foreground : AppTheme.foreground-muted;
+    background: root.active ? (root.group-focused || !AppTheme.framed ? AppTheme.tab-active : AppTheme.tab-active.transparentize(0.45))
+        : touch.has-hover ? (AppTheme.framed ? AppTheme.frame.brighter(0.18) : AppTheme.surface-alt)
+        : AppTheme.framed ? AppTheme.frame.darker(0.12) : transparent;
+
+    touch := TouchArea {
+        pointer-event(e) => {
+            if e.button == PointerEventButton.middle && e.kind == PointerEventKind.up {
+                root.close();
+            }
+            if e.button == PointerEventButton.right && e.kind == PointerEventKind.up {
+                root.menu(self.mouse-x, self.mouse-y);
+            }
+            if e.button == PointerEventButton.left && e.kind == PointerEventKind.down {
+                root.select();
+            }
+            if e.button == PointerEventButton.left && e.kind == PointerEventKind.up && root.dragging {
+                root.dragging = false;
+                root.drag(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y, true);
+            }
+        }
+        moved => {
+            if self.pressed && (root.dragging || abs(self.mouse-x - self.pressed-x) > 8px || abs(self.mouse-y - self.pressed-y) > 8px) {
+                root.dragging = true;
+                root.drag(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y, false);
+            }
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 9px;
+        padding-right: 3px;
+        spacing: 5px;
+        VerticalLayout {
+            alignment: center;
+            FileIcon {
+                kind: FileKinds.of(root.title);
+                size: 14px;
+            }
+        }
+        Text {
+            text: root.title;
+            vertical-alignment: center;
+            overflow: elide;
+            font-weight: root.active ? 600 : 400;
+            color: root.text-color;
+            horizontal-stretch: 1;
+        }
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 16px;
+                height: 16px;
+                border-radius: 3px;
+                background: close-touch.has-hover ? root.text-color.transparentize(0.82) : transparent;
+                if root.dirty && !close-touch.has-hover: Rectangle {
+                    width: 7px;
+                    height: 7px;
+                    border-radius: 3.5px;
+                    background: root.text-color;
+                }
+                if !root.dirty || close-touch.has-hover: Icon {
+                    kind: "close";
+                    size: 11px;
+                    color: root.active || touch.has-hover || close-touch.has-hover ? root.text-color : transparent;
+                }
+                close-touch := TouchArea {
+                    clicked => {
+                        root.close();
+                    }
+                }
+            }
+        }
+    }
+
+    if !AppTheme.framed: Rectangle {
+        y: 0px;
+        height: 2px;
+        background: root.active && root.group-focused ? AppTheme.accent : transparent;
+    }
+}
+
+component StripButton inherits Rectangle {
+    in property <string> glyph;
+    in property <string> tip;
+    callback clicked();
+    width: 22px;
+    height: 22px;
+    border-radius: 3px;
+    background: ta.has-hover ? AppTheme.foreground.transparentize(0.85) : transparent;
+    ta := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+    if root.glyph == "split-right" || root.glyph == "split-down": Path {
+        x: 4px;
+        y: 4px;
+        width: 14px;
+        height: 14px;
+        viewbox-width: 14;
+        viewbox-height: 14;
+        commands: root.glyph == "split-right" ? "M 1 2 L 13 2 L 13 12 L 1 12 Z M 7 2 L 7 12" : "M 1 2 L 13 2 L 13 12 L 1 12 Z M 1 7 L 13 7";
+        stroke: AppTheme.framed ? AppTheme.frame-foreground : AppTheme.foreground-muted;
+        stroke-width: 1.2px;
+        fill: transparent;
+    }
+    if root.glyph != "split-right" && root.glyph != "split-down": Icon {
+        x: 4px;
+        y: 4px;
+        kind: root.glyph;
+        size: 14px;
+        color: AppTheme.framed ? AppTheme.frame-foreground : AppTheme.foreground-muted;
+    }
+}
+
+// One editor group: its tab strip and its code editor.
+component GroupView inherits Rectangle {
+    in property <int> index;
+    property <EdPane> pane: EditorApi.panes[root.index];
+    property <int> menu-tab: -1;
+    property <length> menu-x;
+
+    VerticalLayout {
+        strip := Rectangle {
+            height: AppTheme.tab-height;
+            background: AppTheme.framed ? AppTheme.frame : AppTheme.background;
+            HorizontalLayout {
+                Flickable {
+                    horizontal-stretch: 1;
+                    content-width: max(self.width, tabs.preferred-width);
+                    tabs := HorizontalLayout {
+                        alignment: start;
+                        for tab[i] in pane.tabs: GroupTab {
+                            width: tab.width;
+                            title: tab.title;
+                            dirty: tab.dirty;
+                            active: tab.active;
+                            group-focused: pane.focused;
+                            select => {
+                                EditorApi.tab-clicked(root.index, i);
+                            }
+                            close => {
+                                EditorApi.tab-close(root.index, i);
+                            }
+                            menu(x, y) => {
+                                root.menu-tab = i;
+                                root.menu-x = self.x + x;
+                            }
+                            drag(x, y, released) => {
+                                EditorApi.tab-drag(root.index, i, x, y, released);
+                            }
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    padding-right: 4px;
+                    spacing: 2px;
+                    alignment: end;
+                    VerticalLayout {
+                        alignment: center;
+                        StripButton {
+                            glyph: "split-right";
+                            tip: "Split Right";
+                            clicked => {
+                                EditorApi.group-action(root.index, "split-right");
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        StripButton {
+                            glyph: "split-down";
+                            tip: "Split Down";
+                            clicked => {
+                                EditorApi.group-action(root.index, "split-down");
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        StripButton {
+                            glyph: pane.floating ? "panel-bottom" : "clone";
+                            tip: pane.floating ? "Dock" : "Move to New Window";
+                            clicked => {
+                                EditorApi.group-action(root.index, pane.floating ? "dock" : "new-window");
+                            }
+                        }
+                    }
+                }
+            }
+            Rectangle {
+                y: parent.height - 2px;
+                height: 2px;
+                background: AppTheme.framed && pane.focused ? AppTheme.tab-active : transparent;
+            }
+            if !AppTheme.framed: Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                background: AppTheme.border;
+            }
+        }
+
+        CodeEditor {
+            index: root.index;
+            vertical-stretch: 1;
+        }
+    }
+
+    // Tab context menu.
+    if root.menu-tab >= 0: Rectangle {
+        x: min(root.menu-x, root.width - self.width - 4px);
+        y: strip.height;
+        width: 200px;
+        height: menu.preferred-height;
+        background: AppTheme.popup-background;
+        border-width: 1px;
+        border-color: AppTheme.popup-border;
+        drop-shadow-blur: 10px;
+        drop-shadow-color: AppTheme.popup-shadow;
+        menu := VerticalLayout {
+            padding: 4px;
+            for item in [
+                { label: "Close", action: "close" },
+                { label: "Close Others", action: "close-others" },
+                { label: "Split Right", action: "split-right" },
+                { label: "Split Down", action: "split-down" },
+                { label: "Move to New Window", action: "new-window" },
+            ]: Rectangle {
+                height: 24px;
+                background: item-ta.has-hover ? AppTheme.popup-selection : transparent;
+                item-ta := TouchArea {
+                    clicked => {
+                        if item.action == "close" {
+                            EditorApi.tab-close(root.index, root.menu-tab);
+                        } else {
+                            EditorApi.tab-clicked(root.index, root.menu-tab);
+                            EditorApi.group-action(root.index, item.action);
+                        }
+                        root.menu-tab = -1;
+                    }
+                }
+                Text {
+                    x: 10px;
+                    text: item.label;
+                    color: AppTheme.foreground;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+    if root.menu-tab >= 0: TouchArea {
+        // Clicking elsewhere closes the menu.
+        x: 0;
+        y: strip.height + 132px;
+        height: max(0px, root.height - self.y);
+        clicked => {
+            root.menu-tab = -1;
+        }
+    }
+}
+
+// The editor area: editor groups laid out by Rust (see src/editor/layout.rs),
+// splitters between them and the drop preview while dragging a tab.
+export component EditorArea inherits Rectangle {
+    background: AppTheme.framed ? AppTheme.frame : AppTheme.background;
+    clip: true;
+
+    function report() {
+        EditorApi.area-resized(self.absolute-position.x, self.absolute-position.y, self.width, self.height);
+    }
+    init => {
+        root.report();
+    }
+    changed width => {
+        root.report();
+    }
+    changed height => {
+        root.report();
+    }
+
+    for p[i] in EditorApi.panes: GroupView {
+        visible: !p.floating;
+        index: i;
+        x: p.gx;
+        y: p.gy;
+        width: p.gw;
+        height: p.gh;
+    }
+
+    for s[i] in EditorApi.splitters: Rectangle {
+        x: s.x;
+        y: s.y;
+        width: s.w;
+        height: s.h;
+        background: sta.has-hover || sta.pressed ? AppTheme.accent.transparentize(0.4) : transparent;
+        sta := TouchArea {
+            mouse-cursor: s.vertical ? MouseCursor.row-resize : MouseCursor.col-resize;
+            moved => {
+                if self.pressed {
+                    EditorApi.splitter-drag(i, s.vertical ? self.mouse-y - self.pressed-y : self.mouse-x - self.pressed-x);
+                }
+            }
+        }
+    }
+
+    if EditorApi.drop-visible: Rectangle {
+        x: EditorApi.drop-x;
+        y: EditorApi.drop-y;
+        width: EditorApi.drop-w;
+        height: EditorApi.drop-h;
+        background: AppTheme.accent.transparentize(0.7);
+        border-width: 2px;
+        border-color: AppTheme.accent;
+    }
+}
+
+// A detached editor group in its own native window.
+export component EditorWindow inherits Window {
+    in property <int> pane;
+    title: EditorApi.panes[root.pane].tabs.length > 0 ? EditorApi.panes[root.pane].tabs[0].title + " - Apex IDE" : "Apex IDE";
+    preferred-width: 900px;
+    preferred-height: 640px;
+    background: AppTheme.editor-background;
+    default-font-family: AppTheme.ui-font;
+    default-font-size: AppTheme.ui-font-size;
+    GroupView {
+        index: root.pane;
+    }
+}
